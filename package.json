@@ -1,0 +1,91 @@
+{
+  "name": "angular-component-live",
+  "displayName": "Angular Component Live",
+  "description": "Isolate and render any Angular .component.ts in a live preview tab with automatic Dependency Injection mocking and zero full-project build.",
+  "version": "0.1.0",
+  "publisher": "angular-component-live",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other",
+    "Debuggers",
+    "Testing"
+  ],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onCommand:angularComponentLive.openPreview"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "angularComponentLive.openPreview",
+        "title": "Angular Component Live: Open Isolated Preview",
+        "shortTitle": "Live Preview",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "angularComponentLive.refreshPreview",
+        "title": "Angular Component Live: Refresh Preview",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "angularComponentLive.openPreview",
+          "when": "resourceFilename =~ /\\.component\\.ts$/",
+          "group": "navigation@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "angularComponentLive.openPreview",
+          "when": "resourceFilename =~ /\\.component\\.ts$/",
+          "group": "navigation@1"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "angularComponentLive.openPreview",
+          "when": "resourceFilename =~ /\\.component\\.ts$/",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Angular Component Live",
+      "properties": {
+        "angularComponentLive.enableCodeLens": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show '▶ Angular Component Live' button above @Component decorators."
+        },
+        "angularComponentLive.autoMockServices": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically generate recursive Proxy mocks (compatible with RxJS Observables, Promises, and Signals) for injected services."
+        },
+        "angularComponentLive.port": {
+          "type": "number",
+          "default": 0,
+          "description": "Port for the isolated preview server (0 = auto-select free port)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "package": "node esbuild.js --production"
+  },
+  "dependencies": {
+    "esbuild": "^0.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.3"
+  }
+}
