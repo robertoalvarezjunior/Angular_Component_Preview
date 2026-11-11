@@ -14,6 +14,10 @@
   <img src="https://img.shields.io/badge/Zoneless%20%26%20Signals-Supported-10b981.svg" alt="Signals & Zoneless Supported" />
 </p>
 
+<p align="center">
+  <img src="assets/demo.gif" alt="Angular Component Preview Demo" width="100%" />
+</p>
+
 ---
 
 **Angular Component Preview** lets you run and preview any Angular component **100% in isolation** inside a side tab of your IDE—**without building the entire project (`ng serve`)** and **without adding the component to routes or parent templates**.
