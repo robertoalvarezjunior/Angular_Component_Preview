@@ -1,0 +1,36 @@
+# Dependencies
+node_modules/
+
+# Build output & source maps
+dist/
+out/
+*.tsbuildinfo
+
+# Packaged VSIX installers
+*.vsix
+
+# Environment variables, tokens, and secrets (VSCE_PAT, OVSX_PAT, etc.)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.vsce
+.ovsx
+
+# Logs & caches
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.npm/
+.eslintcache
+.vscode-test/
+
+# OS & Editor temporary files
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~

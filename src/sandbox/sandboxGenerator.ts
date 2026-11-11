@@ -1,6 +1,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ComponentMetadata } from '../analyzer/componentAnalyzer';
+import {
+  assertNoLinksBelow,
+  escapeHtml,
+  isPathInside,
+  isSafeElementSelector,
+  isSafeIdentifier,
+  safeWriteFile,
+} from '../security/guards';
 
 export interface SandboxGenerationResult {
   sandboxDir: string;
@@ -19,6 +27,15 @@ export class SandboxGenerator {
     meta: ComponentMetadata,
     autoMockServices: boolean
   ): SandboxGenerationResult {
+    if (!isSafeElementSelector(meta.selector)) {
+      throw new Error(
+        `Unsupported component selector "${meta.selector}". Only element selectors (e.g. "app-user-card") can be previewed.`
+      );
+    }
+    if (!isSafeIdentifier(meta.className)) {
+      throw new Error(`Unsupported component class name "${meta.className}".`);
+    }
+
     const projectRoot = this.findAngularProjectRoot(meta.filePath);
     const sandboxDir = path.join(
       projectRoot,
@@ -27,6 +44,8 @@ export class SandboxGenerator {
       'angular-component-live'
     );
 
+    // Refuse to follow symlinks/junctions planted by the repository (would redirect writes outside the project)
+    assertNoLinksBelow(path.join(projectRoot, 'node_modules'), sandboxDir);
     if (!fs.existsSync(sandboxDir)) {
       fs.mkdirSync(sandboxDir, { recursive: true });
     }
@@ -35,7 +54,7 @@ export class SandboxGenerator {
 
     // 1. Write the Universal DI Auto-Mock utility
     const autoMockFilePath = path.join(sandboxDir, 'auto-mock.ts');
-    fs.writeFileSync(autoMockFilePath, this.buildAutoMockSource(), 'utf-8');
+    safeWriteFile(autoMockFilePath, this.buildAutoMockSource());
 
     // 2. Write the isolated PreviewHostComponent + bootstrapper (`main.preview.ts`)
     const entryFilePath = path.join(sandboxDir, 'main.preview.ts');
@@ -46,11 +65,11 @@ export class SandboxGenerator {
       globalStyles,
       autoMockServices
     );
-    fs.writeFileSync(entryFilePath, mainSource, 'utf-8');
+    safeWriteFile(entryFilePath, mainSource);
 
     // 3. Write index.html
     const indexHtmlPath = path.join(sandboxDir, 'index.html');
-    fs.writeFileSync(indexHtmlPath, this.buildIndexHtml(meta), 'utf-8');
+    safeWriteFile(indexHtmlPath, this.buildIndexHtml(meta));
 
     return {
       sandboxDir,
@@ -98,7 +117,12 @@ export class SandboxGenerator {
               const styleRel = typeof s === 'string' ? s : s?.input;
               if (styleRel) {
                 const absStyle = path.resolve(projectRoot, styleRel);
-                if (fs.existsSync(absStyle)) {
+                // Only bundle style files that live inside the project
+                if (
+                  /\.(css|scss|sass)$/i.test(absStyle) &&
+                  fs.existsSync(absStyle) &&
+                  isPathInside(projectRoot, absStyle)
+                ) {
                   styles.push(absStyle);
                 }
               }
@@ -165,6 +189,10 @@ const SAMPLE_CARD_ITEM: Record<string, any> = {
   ],
   abilities: [{ name: 'static', isHidden: false }],
 };
+
+export function createSampleObjectInput(_inputName: string): any {
+  return { ...SAMPLE_CARD_ITEM };
+}
 
 const PRIMITIVE_HINTS: Record<string, any> = {
   ...SAMPLE_CARD_ITEM,
@@ -449,9 +477,9 @@ export function createActivatedRouteMock() {
   ): string {
     const componentImportPath = this.toPosixRelativeImport(sandboxDir, meta.filePath);
 
-    // Import global styles
+    // Import global styles (specifiers are JSON-encoded so paths can never break out of the string literal)
     const styleImports = globalStyles
-      .map((s) => `import '${s.replace(/\\/g, '/')}';`)
+      .map((s) => `import ${JSON.stringify(s.replace(/\\/g, '/'))};`)
       .join('\n');
 
     // Resolve injected dependencies to mock providers
@@ -465,17 +493,22 @@ export function createActivatedRouteMock() {
           // Handled by router mock providers below
           return;
         }
+        // Tokens like @Inject('API_URL') or expressions cannot be imported by name; skip them safely
+        if (!isSafeIdentifier(dep.tokenName)) {
+          return;
+        }
         if (dep.importPath) {
           let resolvedSpecifier = dep.importPath;
           if (dep.importPath.startsWith('.')) {
             const absDepPath = path.resolve(componentDir, dep.importPath);
             resolvedSpecifier = this.toPosixRelativeImport(sandboxDir, absDepPath);
           }
+          const specifierLiteral = JSON.stringify(resolvedSpecifier);
           const aliasName = `DepToken_${index}_${dep.tokenName}`;
           if (dep.isDefaultImport) {
-            depImports.push(`import ${aliasName} from '${resolvedSpecifier}';`);
+            depImports.push(`import ${aliasName} from ${specifierLiteral};`);
           } else {
-            depImports.push(`import { ${dep.tokenName} as ${aliasName} } from '${resolvedSpecifier}';`);
+            depImports.push(`import { ${dep.tokenName} as ${aliasName} } from ${specifierLiteral};`);
           }
           depProviders.push(
             `    { provide: ${aliasName}, useFactory: (injector: Injector) => createSmartServiceInstance(${aliasName}, '${dep.tokenName}', injector), deps: [Injector] },`
@@ -488,36 +521,72 @@ export function createActivatedRouteMock() {
     let declaringModuleImport = '';
     let hostImportsList = meta.standalone ? `[${meta.className}]` : `[]`;
 
-    if (!meta.standalone && meta.declaringModule) {
+    if (!meta.standalone && meta.declaringModule && isSafeIdentifier(meta.declaringModule.className)) {
       const modSpecifier = this.toPosixRelativeImport(sandboxDir, meta.declaringModule.filePath);
-      declaringModuleImport = `import { ${meta.declaringModule.className} } from '${modSpecifier}';`;
+      declaringModuleImport = `import { ${meta.declaringModule.className} } from ${JSON.stringify(modSpecifier)};`;
       hostImportsList = `[${meta.declaringModule.className}]`;
-    } else if (!meta.standalone && !meta.declaringModule) {
+    } else if (!meta.standalone) {
       // Fallback: try importing the component directly or declaring it in an ad-hoc NgModule
       declaringModuleImport = `import { NgModule } from '@angular/core';\nimport { CommonModule } from '@angular/common';\n@NgModule({ declarations: [${meta.className}], imports: [CommonModule], exports: [${meta.className}] })\nexport class IsolatedFallbackModule {}`;
       hostImportsList = `[IsolatedFallbackModule]`;
     }
 
-    // Build default mock input bindings for required inputs
+    // Build interactive @Input() bindings (using Angular Signals so both Zoneless and Zone.js update live!)
+    // and @Output() event listeners that postMessage back to the IDE Webview panel.
     const inputBindings: string[] = [];
+    const outputBindings: string[] = [];
     const hostInputProps: string[] = [];
+    const inputUpdateCases: string[] = [];
+    const initialInputReportEntries: string[] = [];
 
     meta.inputs.forEach((inp, idx) => {
-      if (inp.required || !inp.defaultValueExpr) {
-        const propVar = `mockInput_${idx}`;
-        const boundName = inp.alias || inp.name;
-        let defaultVal = `'Sample ${inp.name}'`;
-        if (inp.type === 'number') defaultVal = '42';
-        else if (inp.type === 'boolean') defaultVal = 'true';
-        else if (inp.type === 'array') defaultVal = '[]';
-        else if (inp.type === 'object') defaultVal = `createUniversalServiceMock('Input_${inp.name}')`;
-
-        hostInputProps.push(`  ${propVar}: any = ${defaultVal};`);
-        inputBindings.push(`[${boundName}]="${propVar}"`);
+      // Names/aliases are interpolated into generated TS and Angular template code: only allow plain identifiers
+      if (!isSafeIdentifier(inp.name) || (inp.alias !== undefined && !isSafeIdentifier(inp.alias))) {
+        return;
       }
+      const propVar = `mockInput_${idx}`;
+      const boundName = inp.alias || inp.name;
+      let defaultVal = `'Sample ${inp.name}'`;
+
+      if (inp.defaultValueExpr && !inp.defaultValueExpr.includes('input(') && !inp.defaultValueExpr.includes('input.')) {
+        // Keep primitive literals if simple, otherwise use typed sample
+        const trimmed = inp.defaultValueExpr.trim();
+        if (/^(true|false|-?\d+(\.\d+)?|'[^']*'|"[^"]*"|\[\])$/.test(trimmed)) {
+          defaultVal = trimmed;
+        }
+      }
+
+      if (defaultVal === `'Sample ${inp.name}'`) {
+        if (inp.type === 'number') defaultVal = '1';
+        else if (inp.type === 'boolean') defaultVal = 'false';
+        else if (inp.type === 'array') defaultVal = '[]';
+        else if (inp.type === 'object') {
+          defaultVal = `createSampleObjectInput('${inp.name}')`;
+        } else if (inp.rawType && inp.rawType.includes('PokemonTypeEnum')) {
+          defaultVal = `'electric'`;
+        }
+      }
+
+      hostInputProps.push(`  ${propVar} = signal<any>(${defaultVal});`);
+      inputBindings.push(`[${boundName}]="${propVar}()"`);
+      inputUpdateCases.push(
+        `        if (msg.name === '${inp.name}' || msg.name === '${boundName}') {\n          this.${propVar}.set(msg.value);\n        }`
+      );
+      initialInputReportEntries.push(
+        `      '${inp.name}': this.serializeSafe(this.${propVar}()),`
+      );
     });
 
-    const bindingsStr = inputBindings.length > 0 ? ' ' + inputBindings.join(' ') : '';
+    meta.outputs.forEach((out) => {
+      if (!isSafeIdentifier(out.name) || (out.alias !== undefined && !isSafeIdentifier(out.alias))) {
+        return;
+      }
+      const boundOutName = out.alias || out.name;
+      outputBindings.push(`(${boundOutName})="onComponentOutput('${out.name}', '${boundOutName}', $event)"`);
+    });
+
+    const allBindings = [...inputBindings, ...outputBindings];
+    const bindingsStr = allBindings.length > 0 ? ' ' + allBindings.join(' ') : '';
 
     // Check if zone.js, @angular/router or @angular/common/http exist in project's node_modules
     const hasZoneJs = fs.existsSync(path.join(projectRoot, 'node_modules', 'zone.js'));
@@ -555,11 +624,11 @@ export function createActivatedRouteMock() {
 ${zoneImport}
 import '@angular/compiler';
 ${styleImports}
-import { Component, ErrorHandler, Injectable, Injector, CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA } from '@angular/core';
+import { Component, ErrorHandler, Injectable, Injector, OnInit, signal, CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 ${extraImports.join('\n')}
-import { createSmartServiceInstance, createUniversalServiceMock, createActivatedRouteMock } from './auto-mock';
-import { ${meta.className} } from '${componentImportPath}';
+import { createSmartServiceInstance, createUniversalServiceMock, createActivatedRouteMock, createSampleObjectInput } from './auto-mock';
+import { ${meta.className} } from ${JSON.stringify(componentImportPath)};
 ${declaringModuleImport}
 ${depImports.join('\n')}
 
@@ -586,8 +655,52 @@ class PreviewErrorHandler implements ErrorHandler {
     </div>
   \`,
 })
-export class PreviewHostComponent {
+export class PreviewHostComponent implements OnInit {
 ${hostInputProps.join('\n')}
+
+  ngOnInit(): void {
+    window.addEventListener('message', (event) => {
+      // Only accept control messages from the IDE webview that embeds this preview
+      if (event.source !== window.parent || window.parent === window) return;
+      const msg = event.data;
+      if (!msg || typeof msg !== 'object') return;
+      if (msg.type === 'NG_LIVE_SET_INPUT') {
+${inputUpdateCases.join('\n')}
+      } else if (msg.type === 'NG_LIVE_GET_INITIAL_INPUTS') {
+        this.reportInitialInputs();
+      }
+    });
+    this.reportInitialInputs();
+  }
+
+  reportInitialInputs(): void {
+    const initialValues: Record<string, any> = {
+${initialInputReportEntries.join('\n')}
+    };
+    window.parent?.postMessage({
+      type: 'NG_LIVE_INITIAL_INPUTS',
+      values: initialValues,
+    }, '*');
+  }
+
+  onComponentOutput(name: string, alias: string, payload: any): void {
+    window.parent?.postMessage({
+      type: 'NG_LIVE_OUTPUT_EMITTED',
+      name,
+      alias,
+      payload: this.serializeSafe(payload),
+      timestamp: new Date().toLocaleTimeString(),
+    }, '*');
+  }
+
+  private serializeSafe(val: any): any {
+    try {
+      if (val === undefined) return 'undefined';
+      return JSON.parse(JSON.stringify(val));
+    } catch {
+      return String(val);
+    }
+  }
 }
 
 bootstrapApplication(PreviewHostComponent, {
@@ -613,7 +726,7 @@ ${depProviders.join('\n')}
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Live Preview: ${meta.className}</title>
+  <title>Live Preview: ${escapeHtml(meta.className)}</title>
   <style>
     html, body {
       margin: 0;
@@ -642,15 +755,16 @@ ${depProviders.join('\n')}
       white-space: pre-wrap;
     }
   </style>
-  <link rel="stylesheet" href="/bundle.css" onerror="this.remove()" />
+  <!-- URLs are relative so they stay under the secret per-session path prefix -->
+  <link rel="stylesheet" href="bundle.css" onerror="this.remove()" />
 </head>
 <body>
   <ng-live-preview-host></ng-live-preview-host>
   <div id="ng-live-error-banner"></div>
-  <script type="module" src="/main.preview.js"></script>
+  <script type="module" src="main.preview.js"></script>
   <script>
     // Live Reload via Server-Sent Events (SSE)
-    const evtSource = new EventSource('/__ng_live_sse');
+    const evtSource = new EventSource('__ng_live_sse');
     evtSource.onmessage = (event) => {
       if (event.data === 'reload') {
         window.location.reload();

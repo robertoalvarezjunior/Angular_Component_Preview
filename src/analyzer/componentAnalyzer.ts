@@ -15,8 +15,15 @@ export interface ComponentInputMeta {
   name: string;
   alias?: string;
   type: 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any';
+  rawType?: string;
   defaultValueExpr?: string;
   required: boolean;
+}
+
+export interface ComponentOutputMeta {
+  name: string;
+  alias?: string;
+  rawType?: string;
 }
 
 export interface ComponentMetadata {
@@ -30,6 +37,8 @@ export interface ComponentMetadata {
   dependencies: InjectedDependency[];
   /** Inputs detected on the component */
   inputs: ComponentInputMeta[];
+  /** Outputs detected on the component */
+  outputs: ComponentOutputMeta[];
   /** Nearest NgModule if standalone is false */
   declaringModule?: {
     className: string;
@@ -137,6 +146,7 @@ export class ComponentAnalyzer {
 
               const dependencies = this.extractDependencies(node, sourceFile, importMap);
               const inputs = this.extractInputs(node, sourceFile);
+              const outputs = this.extractOutputs(node, sourceFile);
               const declaringModule = !standalone ? this.findDeclaringNgModule(filePath, className) : undefined;
 
               foundMetadata = {
@@ -147,6 +157,7 @@ export class ComponentAnalyzer {
                 decoratorLine,
                 dependencies,
                 inputs,
+                outputs,
                 declaringModule,
               };
             }
@@ -301,6 +312,7 @@ export class ComponentAnalyzer {
                 name: propName,
                 alias,
                 type: this.inferSimpleType(member, sourceFile),
+                rawType: member.type ? member.type.getText(sourceFile) : undefined,
                 defaultValueExpr: member.initializer ? member.initializer.getText(sourceFile) : undefined,
                 required,
               });
@@ -314,9 +326,13 @@ export class ComponentAnalyzer {
         const callText = member.initializer.expression.getText(sourceFile);
         if (callText === 'input' || callText === 'input.required') {
           const isRequired = callText === 'input.required';
+          const firstArg = member.initializer.arguments[0];
+          const typeArg = member.initializer.typeArguments?.[0];
           inputs.push({
             name: propName,
             type: this.inferSimpleType(member, sourceFile),
+            rawType: typeArg ? typeArg.getText(sourceFile) : undefined,
+            defaultValueExpr: !isRequired && firstArg ? firstArg.getText(sourceFile) : undefined,
             required: isRequired,
           });
         }
@@ -326,20 +342,94 @@ export class ComponentAnalyzer {
     return inputs;
   }
 
+  /**
+   * Extracts @Output() EventEmitter properties and Angular `output()` signal outputs.
+   */
+  private extractOutputs(
+    classNode: ts.ClassDeclaration,
+    sourceFile: ts.SourceFile
+  ): ComponentOutputMeta[] {
+    const outputs: ComponentOutputMeta[] = [];
+
+    for (const member of classNode.members) {
+      if (!ts.isPropertyDeclaration(member) || !member.name) {
+        continue;
+      }
+      const propName = member.name.getText(sourceFile);
+
+      // 1. Check @Output() decorator
+      const decorators = ts.canHaveDecorators(member) ? ts.getDecorators(member) : undefined;
+      if (decorators) {
+        for (const dec of decorators) {
+          if (ts.isCallExpression(dec.expression)) {
+            const decName = dec.expression.expression.getText(sourceFile);
+            if (decName === 'Output' || decName.endsWith('.Output')) {
+              let alias: string | undefined;
+              const arg = dec.expression.arguments[0];
+              if (arg && ts.isStringLiteralLike(arg)) {
+                alias = arg.text;
+              }
+              let rawType: string | undefined;
+              if (member.initializer && ts.isNewExpression(member.initializer) && member.initializer.typeArguments?.[0]) {
+                rawType = member.initializer.typeArguments[0].getText(sourceFile);
+              } else if (member.type) {
+                rawType = member.type.getText(sourceFile);
+              }
+              outputs.push({
+                name: propName,
+                alias,
+                rawType,
+              });
+            }
+          }
+        }
+      }
+
+      // 2. Check Angular `output()` / `outputFromObservable()`
+      if (member.initializer && ts.isCallExpression(member.initializer)) {
+        const callText = member.initializer.expression.getText(sourceFile);
+        if (callText === 'output' || callText === 'outputFromObservable') {
+          const typeArg = member.initializer.typeArguments?.[0];
+          outputs.push({
+            name: propName,
+            rawType: typeArg ? typeArg.getText(sourceFile) : undefined,
+          });
+        }
+      }
+    }
+
+    return outputs;
+  }
+
   private inferSimpleType(
     member: ts.PropertyDeclaration,
     sourceFile: ts.SourceFile
   ): 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any' {
-    const typeText = member.type ? member.type.getText(sourceFile) : '';
+    let typeText = member.type ? member.type.getText(sourceFile) : '';
     const initText = member.initializer ? member.initializer.getText(sourceFile) : '';
+
+    if (!typeText && member.initializer && ts.isCallExpression(member.initializer)) {
+      if (member.initializer.typeArguments?.[0]) {
+        typeText = member.initializer.typeArguments[0].getText(sourceFile);
+      }
+    }
 
     if (typeText.includes('boolean') || initText === 'true' || initText === 'false') {
       return 'boolean';
     }
-    if (typeText.includes('number')) {
+    if (
+      typeText.includes('number') ||
+      /^-?\d+(\.\d+)?$/.test(initText) ||
+      /^input\(\s*-?\d+/.test(initText)
+    ) {
       return 'number';
     }
-    if (typeText.includes('string')) {
+    if (
+      typeText.includes('string') ||
+      typeText.includes('Enum') ||
+      /^['"`]/.test(initText) ||
+      /^input\(\s*['"`]/.test(initText)
+    ) {
       return 'string';
     }
     if (typeText.endsWith('[]') || typeText.startsWith('Array<') || initText.startsWith('[')) {

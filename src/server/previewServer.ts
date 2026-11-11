@@ -1,8 +1,53 @@
 import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import type * as esbuildType from 'esbuild';
 import { SandboxGenerationResult } from '../sandbox/sandboxGenerator';
+import { assertNoLinksBelow, escapeHtml, isPathInside } from '../security/guards';
+
+export interface PreviewServerOptions {
+  /**
+   * Allows loading the `sass` compiler from the opened project's `node_modules`.
+   * Must only be true for trusted workspaces, since it executes workspace code in the extension host.
+   */
+  allowWorkspaceModules?: boolean;
+}
+
+const TEMPLATE_EXTENSIONS = new Set(['.html', '.htm']);
+const STYLE_EXTENSIONS = new Set(['.css', '.scss', '.sass']);
+const MAX_SSE_CLIENTS = 16;
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+  '.otf': 'font/otf',
+  '.mp4': 'video/mp4',
+  '.webm': 'video/webm',
+  '.mp3': 'audio/mpeg',
+  '.txt': 'text/plain; charset=utf-8',
+};
+
+const BASE_HEADERS: http.OutgoingHttpHeaders = {
+  'X-Content-Type-Options': 'nosniff',
+  'Cache-Control': 'no-store',
+  'Referrer-Policy': 'no-referrer',
+  'Cross-Origin-Resource-Policy': 'same-origin',
+};
 
 /**
  * Isolated component preview server powered by esbuild + custom Angular JIT/Template loader.
@@ -20,23 +65,35 @@ export class PreviewServer {
   private currentPort = 0;
   private currentSandbox: SandboxGenerationResult | null = null;
   private fileWatcher: fs.FSWatcher | null = null;
+  private allowWorkspaceModules = false;
+  /**
+   * Random per-session secret. Every privileged route lives under `/<token>/`, so other local
+   * processes or web pages (e.g. via DNS rebinding) cannot read the compiled bundle or the SSE stream.
+   */
+  private readonly sessionToken = crypto.randomBytes(24).toString('hex');
 
-  private resolveEsbuild(projectRoot: string): typeof esbuildType {
-    try {
-      const projEsbuild = require.resolve('esbuild', { paths: [projectRoot, __dirname] });
-      return require(projEsbuild);
-    } catch {
-      return require('esbuild');
-    }
+  /** Base URL (with trailing slash) that the webview iframe must load. */
+  public getPreviewBaseUrl(): string {
+    return `http://127.0.0.1:${this.currentPort}/${this.sessionToken}/`;
+  }
+
+  /**
+   * Always uses the esbuild bundled with the extension. Loading `esbuild` from the opened
+   * project's `node_modules` would let a malicious repository execute code in the extension host.
+   */
+  private resolveEsbuild(): typeof esbuildType {
+    return require('esbuild');
   }
 
   public async startOrUpdate(
     sandbox: SandboxGenerationResult,
     preferredPort = 0,
-    onBuildComplete?: (error?: string) => void
+    onBuildComplete?: (error?: string) => void,
+    options: PreviewServerOptions = {}
   ): Promise<number> {
     this.currentSandbox = sandbox;
-    const esbuild = this.resolveEsbuild(sandbox.projectRoot);
+    this.allowWorkspaceModules = options.allowWorkspaceModules === true;
+    const esbuild = this.resolveEsbuild();
 
     // Dispose previous build context if switching components
     if (this.buildContext) {
@@ -49,6 +106,8 @@ export class PreviewServer {
     }
 
     const outDir = path.join(sandbox.sandboxDir, 'dist');
+    // Never let esbuild write through a symlink/junction planted by the repository
+    assertNoLinksBelow(path.join(sandbox.projectRoot, 'node_modules'), outDir);
     if (!fs.existsSync(outDir)) {
       fs.mkdirSync(outDir, { recursive: true });
     }
@@ -111,6 +170,7 @@ export class PreviewServer {
       target: ['es2022'],
       outfile: path.join(outDir, 'main.preview.js'),
       sourcemap: 'inline',
+      sourcesContent: false,
       absWorkingDir: sandbox.projectRoot,
       tsconfig: tsconfigPath,
       plugins: [angularComponentInlinePlugin],
@@ -175,8 +235,8 @@ export class PreviewServer {
       transformed,
       templateUrlRegex,
       async (_match, relPath) => {
-        const fullPath = path.resolve(fileDir, relPath);
-        if (fs.existsSync(fullPath)) {
+        const fullPath = this.resolveProjectResource(fileDir, relPath, projectRoot, TEMPLATE_EXTENSIONS);
+        if (fullPath) {
           const html = await fs.promises.readFile(fullPath, 'utf-8');
           const escaped = html
             .replace(/\\/g, '\\\\')
@@ -184,7 +244,9 @@ export class PreviewServer {
             .replace(/\$\{/g, '\\${');
           return `template: \`${escaped}\``;
         }
-        return `template: '<div style="color:red">Missing template: ${relPath}</div>'`;
+        return `template: ${JSON.stringify(
+          `<div style="color:red">Missing or blocked template: ${escapeHtml(relPath)}</div>`
+        )}`;
       }
     );
 
@@ -194,8 +256,8 @@ export class PreviewServer {
       transformed,
       styleUrlRegex,
       async (_match, relPath) => {
-        const fullPath = path.resolve(fileDir, relPath);
-        const css = await this.loadAndCompileStyleFile(fullPath, projectRoot);
+        const fullPath = this.resolveProjectResource(fileDir, relPath, projectRoot, STYLE_EXTENSIONS);
+        const css = fullPath ? await this.loadAndCompileStyleFile(fullPath, projectRoot) : '';
         const escaped = css
           .replace(/\\/g, '\\\\')
           .replace(/`/g, '\\`')
@@ -216,8 +278,8 @@ export class PreviewServer {
         );
         const compiledStyles: string[] = [];
         for (const p of paths) {
-          const fullPath = path.resolve(fileDir, p);
-          const css = await this.loadAndCompileStyleFile(fullPath, projectRoot);
+          const fullPath = this.resolveProjectResource(fileDir, p, projectRoot, STYLE_EXTENSIONS);
+          const css = fullPath ? await this.loadAndCompileStyleFile(fullPath, projectRoot) : '';
           const escaped = css
             .replace(/\\/g, '\\\\')
             .replace(/`/g, '\\`')
@@ -229,6 +291,31 @@ export class PreviewServer {
     );
 
     return transformed;
+  }
+
+  /**
+   * Resolves a component resource (`templateUrl`, `styleUrl(s)`) and only returns it when it is an
+   * existing regular file with an allowed extension that lives inside the project root.
+   * Prevents a component from inlining arbitrary files from the user's disk into the served bundle.
+   */
+  private resolveProjectResource(
+    fileDir: string,
+    relPath: string,
+    projectRoot: string,
+    allowedExtensions: Set<string>
+  ): string | null {
+    const fullPath = path.resolve(fileDir, relPath);
+    if (!allowedExtensions.has(path.extname(fullPath).toLowerCase())) {
+      return null;
+    }
+    if (!isPathInside(projectRoot, fullPath)) {
+      return null;
+    }
+    try {
+      return fs.statSync(fullPath).isFile() ? fullPath : null;
+    } catch {
+      return null;
+    }
   }
 
   private async loadAndCompileStyleFile(
@@ -245,7 +332,7 @@ export class PreviewServer {
   }
 
   /**
-   * Attempts to use the user project's installed `sass` package if available;
+   * Attempts to use the user project's installed `sass` package if available (trusted workspaces only);
    * otherwise performs a lightweight SCSS strip so styles still apply cleanly.
    */
   private async compileScssIfAvailable(
@@ -253,6 +340,9 @@ export class PreviewServer {
     projectRoot: string
   ): Promise<string> {
     try {
+      if (!this.allowWorkspaceModules) {
+        throw new Error('Workspace modules are disabled for untrusted workspaces');
+      }
       const sassPkgPath = require.resolve('sass', { paths: [projectRoot] });
       // eslint-disable-next-line @typescript-eslint/no-var-requires
       const sass = require(sassPkgPath);
@@ -296,79 +386,162 @@ export class PreviewServer {
     return undefined;
   }
 
+  /** Only accept requests addressed to the loopback host:port we bound (blocks DNS rebinding). */
+  private isAllowedHost(hostHeader: string | undefined): boolean {
+    if (!hostHeader) {
+      return false;
+    }
+    const host = hostHeader.toLowerCase();
+    return host === `127.0.0.1:${this.currentPort}` || host === `localhost:${this.currentPort}`;
+  }
+
+  private sendText(res: http.ServerResponse, status: number, body: string): void {
+    res.writeHead(status, { ...BASE_HEADERS, 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(body);
+  }
+
+  private sendFile(res: http.ServerResponse, filePath: string, isHead: boolean): void {
+    const contentType = MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+    res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': contentType });
+    if (isHead) {
+      res.end();
+      return;
+    }
+    const stream = fs.createReadStream(filePath);
+    stream.on('error', () => res.destroy());
+    stream.pipe(res);
+  }
+
+  /**
+   * Maps a public URL path to a static asset, Angular CLI style:
+   * `/assets/**` -> `src/assets/**`, `/favicon.ico` -> `src/favicon.ico`, everything else -> `public/**`.
+   * The resolved file must stay inside its base directory (no `..`, no symlink escape, no dotfiles).
+   */
+  private resolveStaticAsset(projectRoot: string, urlPath: string): string | null {
+    let decoded: string;
+    try {
+      decoded = decodeURIComponent(urlPath);
+    } catch {
+      return null;
+    }
+    if (decoded.includes('\0')) {
+      return null;
+    }
+    const segments = decoded.split(/[\\/]+/).filter(Boolean);
+    if (segments.length === 0 || segments.some((s) => s === '..' || s.startsWith('.') || s.includes(':'))) {
+      return null;
+    }
+
+    const candidates: Array<{ base: string; rel: string[] }> = [];
+    if (segments[0] === 'assets') {
+      candidates.push({ base: path.join(projectRoot, 'src', 'assets'), rel: segments.slice(1) });
+    }
+    if (segments.length === 1 && segments[0] === 'favicon.ico') {
+      candidates.push({ base: path.join(projectRoot, 'src'), rel: segments });
+    }
+    candidates.push({ base: path.join(projectRoot, 'public'), rel: segments });
+
+    for (const { base, rel } of candidates) {
+      if (rel.length === 0) {
+        continue;
+      }
+      const candidate = path.join(base, ...rel);
+      if (!isPathInside(base, candidate)) {
+        continue;
+      }
+      try {
+        if (fs.statSync(candidate).isFile()) {
+          return candidate;
+        }
+      } catch {
+        // not found, try next base
+      }
+    }
+    return null;
+  }
+
   private listenHttp(preferredPort: number): Promise<number> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => {
+        if (!this.isAllowedHost(req.headers.host)) {
+          this.sendText(res, 403, 'Forbidden host');
+          return;
+        }
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          this.sendText(res, 405, 'Method not allowed');
+          return;
+        }
+        const isHead = req.method === 'HEAD';
+
         if (!this.currentSandbox) {
-          res.writeHead(503);
-          res.end('Sandbox not initialized');
+          this.sendText(res, 503, 'Sandbox not initialized');
           return;
         }
 
-        const urlPath = (req.url || '/').split('?')[0];
-
-        // SSE endpoint for Live Reload
-        if (urlPath === '/__ng_live_sse') {
-          res.writeHead(200, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive',
-            'Access-Control-Allow-Origin': '*',
-          });
-          res.write('data: connected\n\n');
-          this.sseClients.add(res);
-          req.on('close', () => this.sseClients.delete(res));
-          return;
-        }
+        const rawPath = (req.url || '/').split('?')[0];
+        const tokenPrefix = `/${this.sessionToken}/`;
+        const hasToken = rawPath.startsWith(tokenPrefix);
+        // Path relative to the session root (always starts with '/')
+        const urlPath = hasToken ? rawPath.slice(tokenPrefix.length - 1) : rawPath;
 
         const outDir = path.join(this.currentSandbox.sandboxDir, 'dist');
 
-        if (urlPath === '/' || urlPath === '/index.html') {
-          const html = fs.readFileSync(this.currentSandbox.indexHtmlPath, 'utf-8');
-          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-          res.end(html);
-          return;
-        }
-
-        if (urlPath === '/main.preview.js') {
-          const jsPath = path.join(outDir, 'main.preview.js');
-          if (fs.existsSync(jsPath)) {
-            res.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
-            fs.createReadStream(jsPath).pipe(res);
-          } else {
-            res.writeHead(404);
-            res.end('// Bundle building...');
+        // Privileged routes: only reachable through the secret session prefix
+        if (hasToken) {
+          // SSE endpoint for Live Reload (same-origin only, no CORS headers)
+          if (urlPath === '/__ng_live_sse') {
+            if (this.sseClients.size >= MAX_SSE_CLIENTS) {
+              this.sendText(res, 429, 'Too many live-reload clients');
+              return;
+            }
+            res.writeHead(200, {
+              ...BASE_HEADERS,
+              'Content-Type': 'text/event-stream',
+              Connection: 'keep-alive',
+            });
+            res.write('data: connected\n\n');
+            this.sseClients.add(res);
+            req.on('close', () => this.sseClients.delete(res));
+            return;
           }
-          return;
-        }
 
-        if (urlPath === '/bundle.css' || urlPath === '/main.preview.css') {
-          const cssPath = path.join(outDir, 'main.preview.css');
-          if (fs.existsSync(cssPath)) {
-            res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
-            fs.createReadStream(cssPath).pipe(res);
-          } else {
-            res.writeHead(200, { 'Content-Type': 'text/css; charset=utf-8' });
-            res.end('/* no global css bundle */');
+          if (urlPath === '/' || urlPath === '/index.html') {
+            const html = fs.readFileSync(this.currentSandbox.indexHtmlPath, 'utf-8');
+            res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
+            res.end(isHead ? undefined : html);
+            return;
           }
-          return;
-        }
 
-        // Fallback: serve static assets from project's `src/` or `public/` (e.g. `/assets/...`)
-        const assetCandidates = [
-          path.join(this.currentSandbox.projectRoot, 'src', urlPath),
-          path.join(this.currentSandbox.projectRoot, 'public', urlPath),
-        ];
-        for (const candidate of assetCandidates) {
-          if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
-            res.writeHead(200);
-            fs.createReadStream(candidate).pipe(res);
+          if (urlPath === '/main.preview.js') {
+            const jsPath = path.join(outDir, 'main.preview.js');
+            if (fs.existsSync(jsPath)) {
+              this.sendFile(res, jsPath, isHead);
+            } else {
+              this.sendText(res, 404, '// Bundle building...');
+            }
+            return;
+          }
+
+          if (urlPath === '/bundle.css' || urlPath === '/main.preview.css') {
+            const cssPath = path.join(outDir, 'main.preview.css');
+            if (fs.existsSync(cssPath)) {
+              this.sendFile(res, cssPath, isHead);
+            } else {
+              res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/css; charset=utf-8' });
+              res.end('/* no global css bundle */');
+            }
             return;
           }
         }
 
-        res.writeHead(404);
-        res.end('Not found');
+        // Fallback: serve static assets (`src/assets`, `src/favicon.ico`, `public/`), confined to those folders
+        const asset = this.resolveStaticAsset(this.currentSandbox.projectRoot, urlPath);
+        if (asset) {
+          this.sendFile(res, asset, isHead);
+          return;
+        }
+
+        this.sendText(res, 404, 'Not found');
       });
 
       this.server.on('error', reject);

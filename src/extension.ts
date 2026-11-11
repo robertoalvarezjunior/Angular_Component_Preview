@@ -5,6 +5,7 @@ import { SandboxGenerator } from './sandbox/sandboxGenerator';
 import { PreviewServer } from './server/previewServer';
 import { AngularComponentCodeLensProvider } from './providers/codeLensProvider';
 import { PreviewPanel } from './webview/previewPanel';
+import { isPathInside } from './security/guards';
 
 let previewServer: PreviewServer | null = null;
 let currentMetadata: ComponentMetadata | null = null;
@@ -68,17 +69,23 @@ export function activate(context: vscode.ExtensionContext) {
     const activeComponentDir = path.dirname(currentMetadata.filePath);
 
     if (savedPath === currentMetadata.filePath) {
-      // Re-analyze component in case new services were injected or selector/inputs changed
+      // Re-analyze component in case new services were injected or selector/inputs/outputs changed
       const updatedMeta = analyzer.analyzeFile(savedPath);
       if (updatedMeta) {
+        const ioChanged =
+          JSON.stringify(updatedMeta.inputs) !== JSON.stringify(currentMetadata.inputs) ||
+          JSON.stringify(updatedMeta.outputs) !== JSON.stringify(currentMetadata.outputs);
         currentMetadata = updatedMeta;
         const config = vscode.workspace.getConfiguration('angularComponentLive');
         const autoMock = config.get<boolean>('autoMockServices', true);
         sandboxGenerator.generateSandbox(updatedMeta, autoMock);
+        if (ioChanged) {
+          PreviewPanel.currentPanel.updateMetadata(updatedMeta);
+        }
       }
       await previewServer.triggerRebuild();
     } else if (
-      savedPath.startsWith(activeComponentDir) &&
+      isPathInside(activeComponentDir, savedPath) &&
       (savedPath.endsWith('.html') || savedPath.endsWith('.scss') || savedPath.endsWith('.css') || savedPath.endsWith('.sass'))
     ) {
       // Trigger rebuild to re-inline updated HTML template or SCSS styles
@@ -94,6 +101,13 @@ async function launchIsolatedPreview(
   analyzer: ComponentAnalyzer,
   sandboxGenerator: SandboxGenerator
 ): Promise<void> {
+  if (vscode.workspace.isTrusted === false) {
+    vscode.window.showErrorMessage(
+      'Angular Component Live requires a trusted workspace to compile and execute Angular components.'
+    );
+    return;
+  }
+
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
@@ -121,16 +135,17 @@ async function launchIsolatedPreview(
           previewServer = new PreviewServer();
         }
 
-        const port = await previewServer.startOrUpdate(
+        await previewServer.startOrUpdate(
           sandbox,
           preferredPort,
           (buildError) => {
             PreviewPanel.currentPanel?.showBuildStatus(buildError);
-          }
+          },
+          { allowWorkspaceModules: vscode.workspace.isTrusted !== false }
         );
 
         PreviewPanel.createOrShow(
-          port,
+          previewServer.getPreviewBaseUrl(),
           meta,
           () => {
             // Stop server when preview tab is closed to free resources

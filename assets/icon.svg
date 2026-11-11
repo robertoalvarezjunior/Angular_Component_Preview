@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#dd0031" />
+      <stop offset="55%" stop-color="#c3002f" />
+      <stop offset="100%" stop-color="#7c00ff" />
+    </linearGradient>
+    <linearGradient id="playGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="100%" stop-color="#ffd6e0" />
+    </linearGradient>
+  </defs>
+  <!-- Shield / Hexagon Base -->
+  <path d="M128 16 L232 54 L214 182 L128 240 L42 182 L24 54 Z" fill="url(#bgGrad)" />
+  <path d="M128 16 L128 240 L214 182 L232 54 Z" fill="#000000" opacity="0.14" />
+  <!-- Angular 'A' Silhouette + Live Play Symbol -->
+  <path d="M128 46 L62 190 L88 190 L102 156 L154 156 L168 190 L194 190 Z" fill="#ffffff" opacity="0.22" />
+  <!-- Central Live Play Badge -->
+  <circle cx="128" cy="126" r="46" fill="#18181b" opacity="0.88" stroke="#ffffff" stroke-width="4" />
+  <polygon points="114,102 114,150 154,126" fill="url(#playGrad)" />
+  <!-- Live Pulse Dot -->
+  <circle cx="192" cy="68" r="14" fill="#10b981" stroke="#18181b" stroke-width="4" />
+</svg>
