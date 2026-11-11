@@ -479,10 +479,13 @@ export class PreviewServer {
         }
 
         const rawPath = (req.url || '/').split('?')[0];
-        const tokenPrefix = `/${this.sessionToken}/`;
-        const hasToken = rawPath.startsWith(tokenPrefix);
+        const tokenPrefix = `/${this.sessionToken}`;
+        const hasToken =
+          rawPath === tokenPrefix || rawPath.startsWith(`${tokenPrefix}/`);
         // Path relative to the session root (always starts with '/')
-        const urlPath = hasToken ? rawPath.slice(tokenPrefix.length - 1) : rawPath;
+        const urlPath = hasToken
+          ? rawPath.slice(tokenPrefix.length) || '/'
+          : rawPath;
 
         const outDir = path.join(this.currentSandbox.sandboxDir, 'dist');
 

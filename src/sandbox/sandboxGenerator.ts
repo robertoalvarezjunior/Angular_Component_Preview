@@ -190,6 +190,20 @@ const SAMPLE_CARD_ITEM: Record<string, any> = {
   abilities: [{ name: 'static', isHidden: false }],
 };
 
+export function createSampleArrayInput(inputName: string): any[] {
+  const lower = inputName.toLowerCase();
+  if (lower.includes('type') || lower.includes('option')) {
+    return [
+      { value: 'all', label: 'Todos os tipos' },
+      { value: 'electric', label: 'Elétrico' },
+      { value: 'fire', label: 'Fogo' },
+      { value: 'water', label: 'Água' },
+      { value: 'grass', label: 'Planta' },
+    ];
+  }
+  return [{ ...SAMPLE_CARD_ITEM }];
+}
+
 export function createSampleObjectInput(_inputName: string): any {
   return { ...SAMPLE_CARD_ITEM };
 }
@@ -549,9 +563,9 @@ export function createActivatedRouteMock() {
       let defaultVal = `'Sample ${inp.name}'`;
 
       if (inp.defaultValueExpr && !inp.defaultValueExpr.includes('input(') && !inp.defaultValueExpr.includes('input.')) {
-        // Keep primitive literals if simple, otherwise use typed sample
+        // Keep primitive literals if simple (except empty array `[]`, which we populate with a helpful sample)
         const trimmed = inp.defaultValueExpr.trim();
-        if (/^(true|false|-?\d+(\.\d+)?|'[^']*'|"[^"]*"|\[\])$/.test(trimmed)) {
+        if (/^(true|false|-?\d+(\.\d+)?|'[^']*'|"[^"]*")$/.test(trimmed)) {
           defaultVal = trimmed;
         }
       }
@@ -559,7 +573,7 @@ export function createActivatedRouteMock() {
       if (defaultVal === `'Sample ${inp.name}'`) {
         if (inp.type === 'number') defaultVal = '1';
         else if (inp.type === 'boolean') defaultVal = 'false';
-        else if (inp.type === 'array') defaultVal = '[]';
+        else if (inp.type === 'array') defaultVal = `createSampleArrayInput('${inp.name}')`;
         else if (inp.type === 'object') {
           defaultVal = `createSampleObjectInput('${inp.name}')`;
         } else if (inp.rawType && inp.rawType.includes('PokemonTypeEnum')) {
@@ -608,7 +622,7 @@ export function createActivatedRouteMock() {
 
     if (hasRouter) {
       extraImports.push(`import { ActivatedRoute, Router, provideRouter } from '@angular/router';`);
-      extraProviders.push(`    provideRouter([]),`);
+      extraProviders.push(`    provideRouter([{ path: '**', children: [] }]),`);
       extraProviders.push(`    { provide: ActivatedRoute, useValue: createActivatedRouteMock() },`);
     }
     if (hasHttp) {
@@ -627,7 +641,7 @@ ${styleImports}
 import { Component, ErrorHandler, Injectable, Injector, OnInit, signal, CUSTOM_ELEMENTS_SCHEMA, NO_ERRORS_SCHEMA } from '@angular/core';
 import { bootstrapApplication } from '@angular/platform-browser';
 ${extraImports.join('\n')}
-import { createSmartServiceInstance, createUniversalServiceMock, createActivatedRouteMock, createSampleObjectInput } from './auto-mock';
+import { createSmartServiceInstance, createUniversalServiceMock, createActivatedRouteMock, createSampleObjectInput, createSampleArrayInput } from './auto-mock';
 import { ${meta.className} } from ${JSON.stringify(componentImportPath)};
 ${declaringModuleImport}
 ${depImports.join('\n')}

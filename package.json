@@ -2,8 +2,8 @@
   "name": "angular-component-live",
   "displayName": "Angular Component Live",
   "description": "Isolate and render any Angular .component.ts in a live preview tab with interactive @Input()/@Output() DevTools, automatic Dependency Injection mocking, and zero full-project build.",
-  "version": "0.1.0",
-  "publisher": "angular-component-live",
+  "version": "0.1.1",
+  "publisher": "robertoalvarezjunior",
   "license": "MIT",
   "icon": "assets/icon.png",
   "repository": {
