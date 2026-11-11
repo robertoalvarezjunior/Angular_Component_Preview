@@ -2,7 +2,7 @@
   "name": "angular-component-preview",
   "displayName": "Angular Component Preview",
   "description": "Isolate and render any Angular .component.ts in a live preview tab with interactive @Input()/@Output() DevTools, automatic Dependency Injection mocking, and zero full-project build.",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "publisher": "robertoalvarezjunior",
   "license": "MIT",
   "icon": "assets/icon.png",
