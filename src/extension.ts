@@ -83,12 +83,12 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 2. Register command to launch isolated live preview (from .ts, .html, .scss, .css, .sass, .less)
   const openPreviewCommand = vscode.commands.registerCommand(
-    'angularComponentLive.openPreview',
+    'angularComponentPreview.openPreview',
     async (uri?: vscode.Uri) => {
       const targetUri = uri || vscode.window.activeTextEditor?.document.uri;
       if (!targetUri) {
         vscode.window.showWarningMessage(
-          'Angular Component Live: Open an Angular component file (.ts, .html, .scss, .css) first.'
+          'Angular Component Preview: Open an Angular component file (.ts, .html, .scss, .css) first.'
         );
         return;
       }
@@ -96,7 +96,7 @@ export function activate(context: vscode.ExtensionContext) {
       const resolvedTsPath = resolveComponentTsPath(targetUri.fsPath);
       if (!resolvedTsPath) {
         vscode.window.showWarningMessage(
-          `Angular Component Live: Could not find a companion Angular .component.ts file for ${path.basename(targetUri.fsPath)}.`
+          `Angular Component Preview: Could not find a companion Angular .component.ts file for ${path.basename(targetUri.fsPath)}.`
         );
         return;
       }
@@ -107,7 +107,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   // 3. Register manual refresh command
   const refreshPreviewCommand = vscode.commands.registerCommand(
-    'angularComponentLive.refreshPreview',
+    'angularComponentPreview.refreshPreview',
     async () => {
       if (currentMetadata) {
         await launchIsolatedPreview(currentMetadata.filePath, analyzer, sandboxGenerator);
@@ -133,7 +133,7 @@ export function activate(context: vscode.ExtensionContext) {
           JSON.stringify(updatedMeta.inputs) !== JSON.stringify(currentMetadata.inputs) ||
           JSON.stringify(updatedMeta.outputs) !== JSON.stringify(currentMetadata.outputs);
         currentMetadata = updatedMeta;
-        const config = vscode.workspace.getConfiguration('angularComponentLive');
+        const config = vscode.workspace.getConfiguration('angularComponentPreview');
         const autoMock = config.get<boolean>('autoMockServices', true);
         sandboxGenerator.generateSandbox(updatedMeta, autoMock, previewServer.getSessionToken());
         if (ioChanged) {
@@ -160,7 +160,7 @@ async function launchIsolatedPreview(
 ): Promise<void> {
   if (vscode.workspace.isTrusted === false) {
     vscode.window.showErrorMessage(
-      'Angular Component Live requires a trusted workspace to compile and execute Angular components.'
+      'Angular Component Preview requires a trusted workspace to compile and execute Angular components.'
     );
     return;
   }
@@ -168,7 +168,7 @@ async function launchIsolatedPreview(
   await vscode.window.withProgress(
     {
       location: vscode.ProgressLocation.Notification,
-      title: `Angular Component Live: Isolating ${path.basename(componentFilePath)}...`,
+      title: `Angular Component Preview: Isolating ${path.basename(componentFilePath)}...`,
       cancellable: false,
     },
     async () => {
@@ -176,13 +176,13 @@ async function launchIsolatedPreview(
         const meta = analyzer.analyzeFile(componentFilePath);
         if (!meta) {
           vscode.window.showErrorMessage(
-            `Angular Component Live: Could not find an @Component class in ${path.basename(componentFilePath)}.`
+            `Angular Component Preview: Could not find an @Component class in ${path.basename(componentFilePath)}.`
           );
           return;
         }
 
         currentMetadata = meta;
-        const config = vscode.workspace.getConfiguration('angularComponentLive');
+        const config = vscode.workspace.getConfiguration('angularComponentPreview');
         const autoMock = config.get<boolean>('autoMockServices', true);
         const preferredPort = config.get<number>('port', 0);
 
@@ -227,7 +227,7 @@ async function launchIsolatedPreview(
         );
       } catch (err: any) {
         vscode.window.showErrorMessage(
-          `Angular Component Live failed: ${err?.message || String(err)}`
+          `Angular Component Preview failed: ${err?.message || String(err)}`
         );
       }
     }

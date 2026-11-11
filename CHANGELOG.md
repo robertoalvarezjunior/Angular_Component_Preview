@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to the **Angular Component Live** extension will be documented in this file.
+All notable changes to the **Angular Component Preview** extension will be documented in this file.
 
 ## [0.1.0] - 2026-11-11
 

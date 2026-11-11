@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="assets/icon.png" alt="Angular Component Live Logo" width="110" />
+  <img src="assets/icon.png" alt="Angular Component Preview Logo" width="110" />
 </p>
 
-<h1 align="center">Angular Component Live</h1>
+<h1 align="center">Angular Component Preview</h1>
 
 <p align="center">
   <strong>Isolated Live Preview & Interactive Playground for Angular Components inside Antigravity IDE, VS Code, Cursor & Windsurf.</strong>
@@ -16,7 +16,7 @@
 
 ---
 
-**Angular Component Live** lets you run and preview any Angular component **100% in isolation** inside a side tab of your IDE—**without building the entire project (`ng serve`)** and **without adding the component to routes or parent templates**.
+**Angular Component Preview** lets you run and preview any Angular component **100% in isolation** inside a side tab of your IDE—**without building the entire project (`ng serve`)** and **without adding the component to routes or parent templates**.
 
 > 🇧🇷 *Guia completo em Português disponível na segunda metade deste documento ([clique aqui](#-guia-em-português)).*
 
@@ -26,7 +26,7 @@
 
 Search directly in your IDE Extensions view (`Ctrl+Shift+X` / `Cmd+Shift+X`):
 ```text
-Angular Component Live
+Angular Component Preview
 ```
 Click **Install** and you're ready to go!
 
@@ -35,7 +35,7 @@ Click **Install** and you're ready to go!
 ## ✨ Features
 
 1. **Zero Full-Project Build (Instant Isolation)**
-   - Compiles *only* the direct import graph of the selected component using `esbuild` and an ephemeral sandbox in `node_modules/.cache/angular-component-live` (never pollutes your `git status`).
+   - Compiles *only* the direct import graph of the selected component using `esbuild` and an ephemeral sandbox in `node_modules/.cache/angular-component-preview` (never pollutes your `git status`).
 2. **Interactive `@Input()` & `@Output()` DevTools Panel**
    - **Live `@Input()` Controls**: Automatically detects `@Input()`, `@Input({ required: true })`, and Signal `input()` / `input.required()`. Edit booleans, numbers, strings, and complex JSON objects/arrays in real time without touching your code.
    - **Real-Time `@Output()` Event Logger**: Listens to all `@Output()` `EventEmitter` and `output()` emissions, displaying timestamps and JSON payloads as you click and interact with the component.
@@ -58,9 +58,9 @@ Click **Install** and you're ready to go!
 1. Open any Angular project in **Antigravity IDE**, **VS Code**, **Cursor**, or **Windsurf**.
 2. Open any component file (`.ts`, `.html`, `.scss`, or `.css`).
 3. Start the isolated preview using any of the triggers:
-   - Click the colorful **Angular Live Preview** icon in the top-right Editor Title bar.
-   - Click the **`▶ Angular Component Live (ComponentName)`** CodeLens button right above `@Component({...})` in the TypeScript file.
-   - Right-click the file in the Explorer or Editor and select **`Angular Component Live: Open Isolated Preview`**.
+   - Click the colorful **Angular Component Preview** icon in the top-right Editor Title bar.
+   - Click the **`▶ Angular Component Preview (ComponentName)`** CodeLens button right above `@Component({...})` in the TypeScript file.
+   - Right-click the file in the Explorer or Editor and select **`Angular Component Preview: Open Isolated Preview`**.
 4. Edit your component template, styles, or code and save (`Ctrl+S` / `Cmd+S`) to see instant Live Reload updates, or tweak `@Input()` values live in the bottom DevTools dock!
 
 ---
@@ -69,22 +69,22 @@ Click **Install** and you're ready to go!
 
 | Setting | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `angularComponentLive.enableCodeLens` | `boolean` | `true` | Show the `▶ Angular Component Live` button above `@Component` decorators. |
-| `angularComponentLive.autoMockServices` | `boolean` | `true` | Automatically instantiate services with a recursive Proxy fallback for injected dependencies. |
-| `angularComponentLive.port` | `number` | `0` | Port for the isolated preview server (`0` = automatically pick a free port). |
+| `angularComponentPreview.enableCodeLens` | `boolean` | `true` | Show the `▶ Angular Component Preview` button above `@Component` decorators. |
+| `angularComponentPreview.autoMockServices` | `boolean` | `true` | Automatically instantiate services with a recursive Proxy fallback for injected dependencies. |
+| `angularComponentPreview.port` | `number` | `0` | Port for the isolated preview server (`0` = automatically pick a free port). |
 
 ---
 
 # 🇧🇷 Guia em Português
 
-O **Angular Component Live** permite rodar e visualizar qualquer componente do Angular **de forma 100% isolada** em uma aba lateral da sua IDE (**Antigravity IDE**, **VS Code**, **Cursor**, **Windsurf**, etc.) — **sem precisar rodar `ng serve` do projeto inteiro** e **sem precisar referenciar o componente em rotas ou páginas**.
+O **Angular Component Preview** permite rodar e visualizar qualquer componente do Angular **de forma 100% isolada** em uma aba lateral da sua IDE (**Antigravity IDE**, **VS Code**, **Cursor**, **Windsurf**, etc.) — **sem precisar rodar `ng serve` do projeto inteiro** e **sem precisar referenciar o componente em rotas ou páginas**.
 
 ## 📥 Como Instalar
 
 Instale diretamente pela aba de Extensões da sua IDE (`Ctrl+Shift+X`):
 1. Pesquise por:
    ```text
-   Angular Component Live
+   Angular Component Preview
    ```
 2. Clique em **Instalar**.
 
@@ -94,7 +94,7 @@ Instale diretamente pela aba de Extensões da sua IDE (`Ctrl+Shift+X`):
 
 ## ✨ Principais Recursos
 
-- **Execução Isolada Instantânea (Zero Full-Build)**: Compila apenas a árvore de imports do componente selecionado dentro de `node_modules/.cache/angular-component-live` (sem sujar o seu `git status`).
+- **Execução Isolada Instantânea (Zero Full-Build)**: Compila apenas a árvore de imports do componente selecionado dentro de `node_modules/.cache/angular-component-preview` (sem sujar o seu `git status`).
 - **Gatilho em Múltiplos Arquivos**: Abra o preview diretamente estando em arquivos `.component.ts`, `.component.html`, `.component.scss`, `.css`, `.sass` ou `.less`.
 - **Painel Interativo de `@Input()` e `@Output()`**:
   - **Controles de `@Input()` ao vivo**: Altere textos, números, checkboxes booleanos e objetos/arrays JSON em tempo real (suporta `@Input()` tradicional e Signals `input()` / `input.required()`).
@@ -111,7 +111,7 @@ Instale diretamente pela aba de Extensões da sua IDE (`Ctrl+Shift+X`):
 
 1. Abra qualquer projeto Angular na IDE.
 2. Abra qualquer arquivo do componente (`.ts`, `.html`, `.scss`, `.css`, etc.).
-3. Clique no **ícone do Angular Live Preview** no canto superior direito do editor (ou no botão **`▶ Angular Component Live`** acima da classe).
+3. Clique no **ícone do Angular Component Preview** no canto superior direito do editor (ou no botão **`▶ Angular Component Preview`** acima da classe).
 4. O componente abrirá na aba lateral imediatamente. Ao editar e salvar (`Ctrl+S`), as mudanças são refletidas em tempo real!
 
 ---

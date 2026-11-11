@@ -47,8 +47,8 @@ export class PreviewPanel {
     }
 
     const panel = vscode.window.createWebviewPanel(
-      'angularComponentLivePreview',
-      `Live: ${meta.className}`,
+      'angularComponentPreview',
+      `Preview: ${meta.className}`,
       { viewColumn: column, preserveFocus: true },
       {
         enableScripts: true,
@@ -70,7 +70,7 @@ export class PreviewPanel {
   public updateContent(previewBaseUrl: string, meta: ComponentMetadata): void {
     this.previewBaseUrl = previewBaseUrl;
     this.meta = meta;
-    this.panel.title = `Live: ${meta.className}`;
+    this.panel.title = `Preview: ${meta.className}`;
     this.panel.webview.html = this.getHtmlForWebview(previewBaseUrl, meta);
   }
 
@@ -82,7 +82,7 @@ export class PreviewPanel {
     const normalizedBase = previewBaseUrl.endsWith('/') ? previewBaseUrl : `${previewBaseUrl}/`;
     this.previewBaseUrl = normalizedBase;
     this.meta = meta;
-    this.panel.title = `Live: ${meta.className}`;
+    this.panel.title = `Preview: ${meta.className}`;
     this.panel.webview.postMessage({
       type: 'switchComponent',
       previewUrl: `${normalizedBase}?t=${Date.now()}`,
@@ -136,7 +136,7 @@ export class PreviewPanel {
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; frame-src ${previewOrigin}; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Angular Component Live: ${safeClassName}</title>
+  <title>Angular Component Preview: ${safeClassName}</title>
   <style>
     :root {
       --bg-toolbar: var(--vscode-editorWidget-background, #1e1e1e);

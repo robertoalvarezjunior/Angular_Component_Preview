@@ -1,23 +1,25 @@
 {
-  "name": "angular-component-live",
-  "displayName": "Angular Component Live",
+  "name": "angular-component-preview",
+  "displayName": "Angular Component Preview",
   "description": "Isolate and render any Angular .component.ts in a live preview tab with interactive @Input()/@Output() DevTools, automatic Dependency Injection mocking, and zero full-project build.",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "robertoalvarezjunior",
   "license": "MIT",
   "icon": "assets/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/robertoalvarezjunior/Angular_Component_live.git"
+    "url": "https://github.com/robertoalvarezjunior/Angular_Component_Preview.git"
   },
   "bugs": {
-    "url": "https://github.com/robertoalvarezjunior/Angular_Component_live/issues"
+    "url": "https://github.com/robertoalvarezjunior/Angular_Component_Preview/issues"
   },
-  "homepage": "https://github.com/robertoalvarezjunior/Angular_Component_live#readme",
+  "homepage": "https://github.com/robertoalvarezjunior/Angular_Component_Preview#readme",
   "keywords": [
     "angular",
     "component",
+    "component preview",
     "live preview",
+    "preview",
     "storybook",
     "sandbox",
     "isolated",
@@ -46,70 +48,70 @@
     "onLanguage:css",
     "onLanguage:sass",
     "onLanguage:less",
-    "onCommand:angularComponentLive.openPreview"
+    "onCommand:angularComponentPreview.openPreview"
   ],
   "main": "./dist/extension.js",
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
-      "description": "Angular Component Live compiles and executes workspace TypeScript/Angular code and requires a trusted workspace."
+      "description": "Angular Component Preview compiles and executes workspace TypeScript/Angular code and requires a trusted workspace."
     },
     "virtualWorkspaces": false
   },
   "contributes": {
     "commands": [
       {
-        "command": "angularComponentLive.openPreview",
-        "title": "Angular Component Live: Open Isolated Preview",
-        "shortTitle": "Angular Live Preview",
+        "command": "angularComponentPreview.openPreview",
+        "title": "Angular Component Preview: Open Isolated Preview",
+        "shortTitle": "Angular Component Preview",
         "icon": {
           "light": "assets/action-icon.svg",
           "dark": "assets/action-icon.svg"
         }
       },
       {
-        "command": "angularComponentLive.refreshPreview",
-        "title": "Angular Component Live: Refresh Preview",
+        "command": "angularComponentPreview.refreshPreview",
+        "title": "Angular Component Preview: Refresh Preview",
         "icon": "$(refresh)"
       }
     ],
     "menus": {
       "editor/title": [
         {
-          "command": "angularComponentLive.openPreview",
+          "command": "angularComponentPreview.openPreview",
           "when": "resourceFilename =~ /\\.(component\\.(ts|html|scss|css|sass|less)|html|scss|css|sass|less)$/",
           "group": "navigation@1"
         }
       ],
       "explorer/context": [
         {
-          "command": "angularComponentLive.openPreview",
+          "command": "angularComponentPreview.openPreview",
           "when": "resourceFilename =~ /\\.(component\\.(ts|html|scss|css|sass|less)|html|scss|css|sass|less)$/",
           "group": "navigation@1"
         }
       ],
       "editor/context": [
         {
-          "command": "angularComponentLive.openPreview",
+          "command": "angularComponentPreview.openPreview",
           "when": "resourceFilename =~ /\\.(component\\.(ts|html|scss|css|sass|less)|html|scss|css|sass|less)$/",
           "group": "navigation@1"
         }
       ]
     },
     "configuration": {
-      "title": "Angular Component Live",
+      "title": "Angular Component Preview",
       "properties": {
-        "angularComponentLive.enableCodeLens": {
+        "angularComponentPreview.enableCodeLens": {
           "type": "boolean",
           "default": true,
-          "description": "Show '▶ Angular Component Live' button above @Component decorators."
+          "description": "Show '▶ Angular Component Preview' button above @Component decorators."
         },
-        "angularComponentLive.autoMockServices": {
+        "angularComponentPreview.autoMockServices": {
           "type": "boolean",
           "default": true,
           "description": "Automatically instantiate real services with a recursive Proxy fallback (compatible with RxJS Observables, Promises, and Signals) for injected dependencies."
         },
-        "angularComponentLive.port": {
+        "angularComponentPreview.port": {
           "type": "number",
           "default": 0,
           "description": "Port for the isolated preview server (0 = auto-select free port)."

@@ -15,7 +15,7 @@ export class AngularComponentCodeLensProvider implements vscode.CodeLensProvider
     document: vscode.TextDocument,
     _token: vscode.CancellationToken
   ): vscode.CodeLens[] {
-    const config = vscode.workspace.getConfiguration('angularComponentLive');
+    const config = vscode.workspace.getConfiguration('angularComponentPreview');
     if (!config.get<boolean>('enableCodeLens', true)) {
       return [];
     }
@@ -33,9 +33,9 @@ export class AngularComponentCodeLensProvider implements vscode.CodeLensProvider
     const range = new vscode.Range(line, 0, line, 0);
 
     const previewLens = new vscode.CodeLens(range, {
-      title: `$(play) Angular Component Live (${meta.className})`,
-      tooltip: `Run ${meta.className} (<${meta.selector}>) in an isolated live preview tab with automatic DI mocks`,
-      command: 'angularComponentLive.openPreview',
+      title: `$(play) Angular Component Preview (${meta.className})`,
+      tooltip: `Run ${meta.className} (<${meta.selector}>) in an isolated preview tab with automatic DI mocks`,
+      command: 'angularComponentPreview.openPreview',
       arguments: [document.uri],
     });
 
