@@ -16,6 +16,7 @@ export interface SandboxGenerationResult {
   entryFilePath: string;
   indexHtmlPath: string;
   globalStyles: string[];
+  sessionToken: string;
 }
 
 export class SandboxGenerator {
@@ -25,7 +26,8 @@ export class SandboxGenerator {
    */
   public generateSandbox(
     meta: ComponentMetadata,
-    autoMockServices: boolean
+    autoMockServices: boolean,
+    sessionToken: string
   ): SandboxGenerationResult {
     if (!isSafeElementSelector(meta.selector)) {
       throw new Error(
@@ -69,7 +71,7 @@ export class SandboxGenerator {
 
     // 3. Write index.html
     const indexHtmlPath = path.join(sandboxDir, 'index.html');
-    safeWriteFile(indexHtmlPath, this.buildIndexHtml(meta));
+    safeWriteFile(indexHtmlPath, this.buildIndexHtml(meta, sessionToken));
 
     return {
       sandboxDir,
@@ -77,6 +79,7 @@ export class SandboxGenerator {
       entryFilePath,
       indexHtmlPath,
       globalStyles,
+      sessionToken,
     };
   }
 
@@ -734,7 +737,9 @@ ${depProviders.join('\n')}
 `;
   }
 
-  private buildIndexHtml(meta: ComponentMetadata): string {
+  private buildIndexHtml(meta: ComponentMetadata, sessionToken: string): string {
+    const cacheBust = Date.now();
+    const safePrefix = `/${encodeURIComponent(sessionToken)}/`;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -769,16 +774,16 @@ ${depProviders.join('\n')}
       white-space: pre-wrap;
     }
   </style>
-  <!-- URLs are relative so they stay under the secret per-session path prefix -->
-  <link rel="stylesheet" href="bundle.css" onerror="this.remove()" />
+  <!-- Root-anchored session paths so Angular Router URL normalization never breaks asset loading -->
+  <link rel="stylesheet" href="${safePrefix}bundle.css?v=${cacheBust}" onerror="this.remove()" />
 </head>
 <body>
   <ng-live-preview-host></ng-live-preview-host>
   <div id="ng-live-error-banner"></div>
-  <script type="module" src="main.preview.js"></script>
+  <script type="module" src="${safePrefix}main.preview.js?v=${cacheBust}"></script>
   <script>
     // Live Reload via Server-Sent Events (SSE)
-    const evtSource = new EventSource('__ng_live_sse');
+    const evtSource = new EventSource('${safePrefix}__ng_live_sse');
     evtSource.onmessage = (event) => {
       if (event.data === 'reload') {
         window.location.reload();
