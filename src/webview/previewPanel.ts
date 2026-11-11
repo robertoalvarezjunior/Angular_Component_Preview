@@ -42,7 +42,7 @@ export class PreviewPanel {
 
     if (PreviewPanel.currentPanel) {
       PreviewPanel.currentPanel.panel.reveal(column, true);
-      PreviewPanel.currentPanel.updateContent(previewBaseUrl, meta);
+      PreviewPanel.currentPanel.switchComponent(previewBaseUrl, meta);
       return PreviewPanel.currentPanel;
     }
 
@@ -74,9 +74,33 @@ export class PreviewPanel {
     this.panel.webview.html = this.getHtmlForWebview(previewBaseUrl, meta);
   }
 
-  public updateMetadata(meta: ComponentMetadata): void {
+  /**
+   * Seamlessly switches the open Webview panel to a newly selected component
+   * without blanking out the whole Webview DOM or losing user's viewport/background selection.
+   */
+  public switchComponent(previewBaseUrl: string, meta: ComponentMetadata): void {
+    const normalizedBase = previewBaseUrl.endsWith('/') ? previewBaseUrl : `${previewBaseUrl}/`;
+    this.previewBaseUrl = normalizedBase;
     this.meta = meta;
-    this.panel.webview.html = this.getHtmlForWebview(this.previewBaseUrl, meta);
+    this.panel.title = `Live: ${meta.className}`;
+    this.panel.webview.postMessage({
+      type: 'switchComponent',
+      previewUrl: `${normalizedBase}?t=${Date.now()}`,
+      previewBaseUrl: normalizedBase,
+      className: meta.className,
+      selector: meta.selector,
+      fileName: path.basename(meta.filePath),
+      mockedDeps:
+        meta.dependencies.length > 0
+          ? meta.dependencies.map((d) => d.tokenName).join(', ')
+          : 'None',
+      inputs: meta.inputs || [],
+      outputs: meta.outputs || [],
+    });
+  }
+
+  public updateMetadata(meta: ComponentMetadata): void {
+    this.switchComponent(this.previewBaseUrl, meta);
   }
 
   public showBuildStatus(error?: string): void {
@@ -404,9 +428,9 @@ export class PreviewPanel {
 <body>
   <div class="toolbar">
     <div class="toolbar-left">
-      <span class="badge">&lt;${safeSelector}&gt;</span>
-      <span><strong>${safeClassName}</strong> <span class="meta-info">(${safeFileName})</span></span>
-      <span class="meta-info" title="Auto-Mocked DI Tokens">| DI Mocks: ${safeMockedDeps}</span>
+      <span id="hdr-selector" class="badge">&lt;${safeSelector}&gt;</span>
+      <span><strong id="hdr-classname">${safeClassName}</strong> <span id="hdr-filename" class="meta-info">(${safeFileName})</span></span>
+      <span id="hdr-dimocks" class="meta-info" title="Auto-Mocked DI Tokens">| DI Mocks: ${safeMockedDeps}</span>
     </div>
     <div class="toolbar-actions">
       <select id="viewport-select" title="Viewport Size">
@@ -433,7 +457,7 @@ export class PreviewPanel {
     <div class="dock-tabs">
       <div class="dock-tab-list">
         <button class="dock-tab active" data-tab="tab-inputs">
-          @Input() Controls <span class="pill-count">${meta.inputs.length}</span>
+          @Input() Controls <span id="input-count-badge" class="pill-count">${meta.inputs.length}</span>
         </button>
         <button class="dock-tab" data-tab="tab-outputs">
           @Output() Events <span id="output-count-badge" class="pill-count">0</span>
@@ -473,13 +497,18 @@ export class PreviewPanel {
     const inputsContainer = document.getElementById('inputs-container');
     const outputsMetaContainer = document.getElementById('outputs-meta');
     const eventsLog = document.getElementById('events-log');
+    const inputBadge = document.getElementById('input-count-badge');
     const outputBadge = document.getElementById('output-count-badge');
     const btnClearEvents = document.getElementById('btn-clear-events');
+    const hdrSelector = document.getElementById('hdr-selector');
+    const hdrClassName = document.getElementById('hdr-classname');
+    const hdrFileName = document.getElementById('hdr-filename');
+    const hdrDiMocks = document.getElementById('hdr-dimocks');
 
-    const previewBaseUrl = ${previewBaseJson};
+    let previewBaseUrl = ${previewBaseJson};
     const previewOrigin = ${previewOriginJson};
-    const componentInputs = ${inputsJson};
-    const componentOutputs = ${outputsJson};
+    let componentInputs = ${inputsJson};
+    let componentOutputs = ${outputsJson};
     let emittedCount = 0;
 
     // Render @Input() Controls Table
@@ -631,6 +660,24 @@ export class PreviewPanel {
           errorBox.style.display = 'none';
           errorBox.textContent = '';
         }
+      } else if (msg.type === 'switchComponent' && !fromIframe) {
+        previewBaseUrl = msg.previewBaseUrl || previewBaseUrl;
+        componentInputs = msg.inputs || [];
+        componentOutputs = msg.outputs || [];
+        hdrSelector.textContent = '<' + (msg.selector || '') + '>';
+        hdrClassName.textContent = msg.className || '';
+        hdrFileName.textContent = '(' + (msg.fileName || '') + ')';
+        hdrDiMocks.textContent = '| DI Mocks: ' + (msg.mockedDeps || 'None');
+        inputBadge.textContent = String(componentInputs.length);
+        emittedCount = 0;
+        outputBadge.textContent = '0';
+        outputBadge.classList.remove('highlight');
+        eventsLog.innerHTML = '<div class="empty-msg">Interact with the component above to see emitted @Output() events in real time...</div>';
+        errorBox.style.display = 'none';
+        errorBox.textContent = '';
+        renderInputControls();
+        renderOutputsHeader();
+        frame.src = msg.previewUrl || (previewBaseUrl + '?t=' + Date.now());
       } else if (fromIframe && msg.type === 'NG_LIVE_INITIAL_INPUTS') {
         renderInputControls(msg.values || {});
       } else if (fromIframe && msg.type === 'NG_LIVE_OUTPUT_EMITTED') {

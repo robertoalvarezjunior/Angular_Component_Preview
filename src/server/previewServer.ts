@@ -77,6 +77,10 @@ export class PreviewServer {
     return `http://127.0.0.1:${this.currentPort}/${this.sessionToken}/`;
   }
 
+  public getSessionToken(): string {
+    return this.sessionToken;
+  }
+
   /**
    * Always uses the esbuild bundled with the extension. Loading `esbuild` from the opened
    * project's `node_modules` would let a malicious repository execute code in the extension host.
@@ -156,7 +160,6 @@ export class PreviewServer {
             self.broadcastSse(`error:${JSON.stringify(errMsg)}`);
             onBuildComplete?.(errMsg);
           } else {
-            self.broadcastSse('reload');
             onBuildComplete?.();
           }
         });
@@ -192,13 +195,16 @@ export class PreviewServer {
       logLevel: 'silent',
     });
 
-    await this.buildContext.watch();
+    // Perform an explicit initial build BEFORE returning so `main.preview.js` is guaranteed
+    // to be updated on disk for the new component before the Webview iframe loads it.
+    try {
+      await this.buildContext.rebuild();
+    } catch {
+      // Build errors are already reported via the plugin's onEnd hook
+    }
 
     if (!this.server) {
       this.currentPort = await this.listenHttp(preferredPort);
-    } else {
-      // Trigger reload on existing clients
-      this.broadcastSse('reload');
     }
 
     return this.currentPort;
@@ -211,6 +217,7 @@ export class PreviewServer {
     if (this.buildContext) {
       try {
         await this.buildContext.rebuild();
+        this.broadcastSse('reload');
       } catch {
         // Errors are already reported via onEnd
       }

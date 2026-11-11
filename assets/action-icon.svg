@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="16" height="16">
+  <defs>
+    <linearGradient id="ngGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff3366" />
+      <stop offset="50%" stop-color="#dd0031" />
+      <stop offset="100%" stop-color="#9b00e8" />
+    </linearGradient>
+  </defs>
+  <!-- Angular Shield -->
+  <path d="M12 1.5 L21.5 4.8 L19.8 16.5 L12 22.5 L4.2 16.5 L2.5 4.8 Z" fill="url(#ngGrad)" />
+  <path d="M12 1.5 L12 22.5 L19.8 16.5 L21.5 4.8 Z" fill="#000000" opacity="0.16" />
+  <!-- Crisp White Play Triangle inside Shield -->
+  <polygon points="9.5,7.2 9.5,16.2 16.8,11.7" fill="#ffffff" />
+  <!-- Green Live Dot -->
+  <circle cx="19" cy="5.2" r="3.2" fill="#10b981" stroke="#18181b" stroke-width="1.2" />
+</svg>

@@ -2,7 +2,7 @@
   "name": "angular-component-live",
   "displayName": "Angular Component Live",
   "description": "Isolate and render any Angular .component.ts in a live preview tab with interactive @Input()/@Output() DevTools, automatic Dependency Injection mocking, and zero full-project build.",
-  "version": "0.1.1",
+  "version": "0.1.4",
   "publisher": "robertoalvarezjunior",
   "license": "MIT",
   "icon": "assets/icon.png",
@@ -41,6 +41,11 @@
   ],
   "activationEvents": [
     "onLanguage:typescript",
+    "onLanguage:html",
+    "onLanguage:scss",
+    "onLanguage:css",
+    "onLanguage:sass",
+    "onLanguage:less",
     "onCommand:angularComponentLive.openPreview"
   ],
   "main": "./dist/extension.js",
@@ -56,8 +61,11 @@
       {
         "command": "angularComponentLive.openPreview",
         "title": "Angular Component Live: Open Isolated Preview",
-        "shortTitle": "Live Preview",
-        "icon": "$(open-preview)"
+        "shortTitle": "Angular Live Preview",
+        "icon": {
+          "light": "assets/action-icon.svg",
+          "dark": "assets/action-icon.svg"
+        }
       },
       {
         "command": "angularComponentLive.refreshPreview",
@@ -69,21 +77,21 @@
       "editor/title": [
         {
           "command": "angularComponentLive.openPreview",
-          "when": "resourceFilename =~ /\\.component\\.ts$/",
+          "when": "resourceFilename =~ /\\.(component\\.(ts|html|scss|css|sass|less)|html|scss|css|sass|less)$/",
           "group": "navigation@1"
         }
       ],
       "explorer/context": [
         {
           "command": "angularComponentLive.openPreview",
-          "when": "resourceFilename =~ /\\.component\\.ts$/",
+          "when": "resourceFilename =~ /\\.(component\\.(ts|html|scss|css|sass|less)|html|scss|css|sass|less)$/",
           "group": "navigation@1"
         }
       ],
       "editor/context": [
         {
           "command": "angularComponentLive.openPreview",
-          "when": "resourceFilename =~ /\\.component\\.ts$/",
+          "when": "resourceFilename =~ /\\.(component\\.(ts|html|scss|css|sass|less)|html|scss|css|sass|less)$/",
           "group": "navigation@1"
         }
       ]
