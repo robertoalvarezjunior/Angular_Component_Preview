@@ -2,9 +2,10 @@ import * as http from 'http';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import * as ts from 'typescript';
 import type * as esbuildType from 'esbuild';
 import { SandboxGenerationResult } from '../sandbox/sandboxGenerator';
-import { assertNoLinksBelow, escapeHtml, isPathInside } from '../security/guards';
+import { assertNoLinksBelow, escapeHtml, isPathInside, unlinkIfExists } from '../security/guards';
 
 export interface PreviewServerOptions {
   /**
@@ -110,11 +111,16 @@ export class PreviewServer {
     }
 
     const outDir = path.join(sandbox.sandboxDir, 'dist');
-    // Never let esbuild write through a symlink/junction planted by the repository
-    assertNoLinksBelow(path.join(sandbox.projectRoot, 'node_modules'), outDir);
+    // Never let esbuild write through a symlink/junction planted anywhere under projectRoot (including node_modules itself)
+    assertNoLinksBelow(sandbox.projectRoot, outDir);
     if (!fs.existsSync(outDir)) {
       fs.mkdirSync(outDir, { recursive: true });
     }
+    // Remove any pre-existing file symlinks in outDir before esbuild writes bundle outputs
+    unlinkIfExists(path.join(outDir, 'main.preview.js'));
+    unlinkIfExists(path.join(outDir, 'main.preview.css'));
+    unlinkIfExists(path.join(outDir, 'main.preview.js.map'));
+    unlinkIfExists(path.join(outDir, 'main.preview.css.map'));
 
     const tsconfigPath = this.findTsconfig(sandbox.projectRoot);
 
@@ -122,6 +128,20 @@ export class PreviewServer {
     const angularComponentInlinePlugin: esbuildType.Plugin = {
       name: 'angular-component-inline-plugin',
       setup(build) {
+        // Confine all resolved module loads (.html, .json, .css, .scss, .ts, .js, dataurl assets, tsconfig paths) to projectRoot
+        build.onLoad({ filter: /.*/ }, (args) => {
+          if (args.path && !isPathInside(sandbox.projectRoot, args.path)) {
+            return {
+              errors: [
+                {
+                  text: `[Angular Component Preview] Blocked import outside project root: ${args.path}`,
+                },
+              ],
+            };
+          }
+          return null;
+        });
+
         // Handle .scss / .sass files imported directly or via global styles
         build.onLoad({ filter: /\.(scss|sass)$/ }, async (args) => {
           const css = await self.compileScssIfAvailable(args.path, sandbox.projectRoot);
@@ -132,7 +152,7 @@ export class PreviewServer {
           };
         });
 
-        // Transform .ts files to inline templateUrl & styleUrls/styleUrl so Angular JIT compiler can render immediately
+        // Transform .ts files to inline templateUrl & styleUrls/styleUrl and emit static ctorParameters for Angular JIT DI
         build.onLoad({ filter: /\.ts$/ }, async (args) => {
           let source = await fs.promises.readFile(args.path, 'utf-8');
           const fileDir = path.dirname(args.path);
@@ -143,6 +163,16 @@ export class PreviewServer {
               fileDir,
               sandbox.projectRoot
             );
+          }
+
+          if (
+            source.includes('constructor') &&
+            (source.includes('@Component') ||
+              source.includes('@Injectable') ||
+              source.includes('@Directive') ||
+              source.includes('@Pipe'))
+          ) {
+            source = self.injectAngularCtorParameters(source, args.path);
           }
 
           return {
@@ -189,9 +219,8 @@ export class PreviewServer {
         '.woff2': 'dataurl',
         '.ttf': 'dataurl',
       },
-      define: {
-        ngDevMode: 'true',
-      },
+      // Do NOT define `ngDevMode: 'true'` as a boolean literal because Angular 14-19 expects `ngDevMode`
+      // to be an object of perf counters (`ngDevMode.tView++`) and initializes it automatically at runtime.
       logLevel: 'silent',
     });
 
@@ -208,6 +237,13 @@ export class PreviewServer {
     }
 
     return this.currentPort;
+  }
+
+  /**
+   * Updates the active sandbox state (including in-memory `indexHtml`) before a rebuild.
+   */
+  public updateSandbox(sandbox: SandboxGenerationResult): void {
+    this.currentSandbox = sandbox;
   }
 
   /**
@@ -301,6 +337,163 @@ export class PreviewServer {
   }
 
   /**
+   * Emits `static ctorParameters = () => [...]` on Angular classes (`@Component`, `@Injectable`, `@Directive`, `@Pipe`)
+   * that declare constructor parameters so `esbuild` preserves imported DI token classes as runtime values
+   * and Angular's JIT compiler (`ReflectionCapabilities.parameters`) can resolve constructor DI in any project.
+   */
+  private injectAngularCtorParameters(source: string, filePath: string): string {
+    try {
+      const sourceFile = ts.createSourceFile(filePath, source, ts.ScriptTarget.Latest, true);
+      const nonValueIdentifiers = new Set<string>([
+        'string',
+        'number',
+        'boolean',
+        'any',
+        'unknown',
+        'object',
+        'Object',
+        'Function',
+        'Array',
+        'ReadonlyArray',
+        'Record',
+        'Partial',
+        'Required',
+        'Promise',
+        'Observable',
+        'Map',
+        'Set',
+      ]);
+
+      // Track interfaces, type aliases, and type-only imports so we never reference them as runtime values
+      sourceFile.forEachChild((node) => {
+        if ((ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node)) && node.name) {
+          nonValueIdentifiers.add(node.name.text);
+        }
+        if (ts.isImportDeclaration(node) && node.importClause) {
+          if (node.importClause.isTypeOnly) {
+            if (node.importClause.name) {
+              nonValueIdentifiers.add(node.importClause.name.text);
+            }
+            if (
+              node.importClause.namedBindings &&
+              ts.isNamedImports(node.importClause.namedBindings)
+            ) {
+              for (const el of node.importClause.namedBindings.elements) {
+                nonValueIdentifiers.add(el.name.text);
+              }
+            }
+          } else if (
+            node.importClause.namedBindings &&
+            ts.isNamedImports(node.importClause.namedBindings)
+          ) {
+            for (const el of node.importClause.namedBindings.elements) {
+              if (el.isTypeOnly) {
+                nonValueIdentifiers.add(el.name.text);
+              }
+            }
+          }
+        }
+      });
+
+      const insertions: Array<{ pos: number; text: string }> = [];
+
+      const visit = (node: ts.Node) => {
+        if (ts.isClassDeclaration(node) && node.name) {
+          const decorators = ts.canHaveDecorators(node) ? ts.getDecorators(node) : undefined;
+          const isAngularClass = decorators?.some((dec) => {
+            if (!ts.isCallExpression(dec.expression)) {
+              return false;
+            }
+            const name = dec.expression.expression.getText(sourceFile).trim();
+            return /^(Component|Injectable|Directive|Pipe|NgModule)$/.test(
+              name.split('.').pop() || ''
+            );
+          });
+
+          if (isAngularClass) {
+            const hasExistingCtorParams = node.members.some(
+              (m) => ts.isPropertyDeclaration(m) && m.name?.getText(sourceFile) === 'ctorParameters'
+            );
+            const ctor = node.members.find((m): m is ts.ConstructorDeclaration =>
+              ts.isConstructorDeclaration(m)
+            );
+
+            if (!hasExistingCtorParams && ctor && ctor.parameters.length > 0) {
+              const paramEntries = ctor.parameters.map((param) => {
+                const paramDecs = ts.canHaveDecorators(param) ? ts.getDecorators(param) : undefined;
+                const decItems: string[] = [];
+                let hasExplicitInjectToken = false;
+
+                if (paramDecs) {
+                  for (const d of paramDecs) {
+                    if (ts.isCallExpression(d.expression)) {
+                      const dName = d.expression.expression.getText(sourceFile).trim();
+                      const shortName = dName.split('.').pop() || '';
+                      if (shortName === 'Inject' || shortName === 'Attribute') {
+                        hasExplicitInjectToken = true;
+                      }
+                      const dArgs = d.expression.arguments
+                        .map((a) => a.getText(sourceFile))
+                        .join(', ');
+                      decItems.push(
+                        dArgs ? `{ type: ${dName}, args: [${dArgs}] }` : `{ type: ${dName} }`
+                      );
+                    } else {
+                      const dName = d.expression.getText(sourceFile).trim();
+                      decItems.push(`{ type: ${dName} }`);
+                    }
+                  }
+                }
+
+                let typeExpr = 'undefined';
+                if (!hasExplicitInjectToken && param.type && ts.isTypeReferenceNode(param.type)) {
+                  const candidate = param.type.typeName.getText(sourceFile).trim();
+                  const rootIdent = candidate.split('.')[0];
+                  if (
+                    /^[A-Za-z_$][A-Za-z0-9_$.]*$/.test(candidate) &&
+                    !nonValueIdentifiers.has(candidate) &&
+                    !nonValueIdentifiers.has(rootIdent)
+                  ) {
+                    typeExpr = candidate;
+                  }
+                }
+
+                if (decItems.length > 0) {
+                  return `{ type: ${typeExpr}, decorators: [${decItems.join(', ')}] }`;
+                }
+                return `{ type: ${typeExpr} }`;
+              });
+
+              const insertPos = node.getEnd() - 1; // right before closing `}` of class
+              insertions.push({
+                pos: insertPos,
+                text: `\n  static ctorParameters = () => [${paramEntries.join(', ')}];\n`,
+              });
+            }
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+
+      visit(sourceFile);
+
+      if (insertions.length === 0) {
+        return source;
+      }
+
+      // Apply insertions from end to start so character offsets remain valid
+      insertions.sort((a, b) => b.pos - a.pos);
+      let result = source;
+      for (const ins of insertions) {
+        result = result.slice(0, ins.pos) + ins.text + result.slice(ins.pos);
+      }
+      return result;
+    } catch {
+      return source;
+    }
+  }
+
+  /**
    * Resolves a component resource (`templateUrl`, `styleUrl(s)`) and only returns it when it is an
    * existing regular file with an allowed extension that lives inside the project root.
    * Prevents a component from inlining arbitrary files from the user's disk into the served bundle.
@@ -386,7 +579,7 @@ export class PreviewServer {
   private findTsconfig(projectRoot: string): string | undefined {
     for (const name of ['tsconfig.app.json', 'tsconfig.json']) {
       const p = path.join(projectRoot, name);
-      if (fs.existsSync(p)) {
+      if (fs.existsSync(p) && isPathInside(projectRoot, p)) {
         return p;
       }
     }
@@ -516,7 +709,11 @@ export class PreviewServer {
           }
 
           if (urlPath === '/' || urlPath === '/index.html') {
-            const html = fs.readFileSync(this.currentSandbox.indexHtmlPath, 'utf-8');
+            const html =
+              this.currentSandbox.indexHtml ||
+              (fs.existsSync(this.currentSandbox.indexHtmlPath)
+                ? fs.readFileSync(this.currentSandbox.indexHtmlPath, 'utf-8')
+                : '');
             res.writeHead(200, { ...BASE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' });
             res.end(isHead ? undefined : html);
             return;
@@ -598,5 +795,6 @@ export class PreviewServer {
       await new Promise<void>((resolve) => this.server!.close(() => resolve()));
       this.server = null;
     }
+    this.currentPort = 0;
   }
 }

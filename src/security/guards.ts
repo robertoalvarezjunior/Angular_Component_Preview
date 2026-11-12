@@ -62,31 +62,63 @@ export function isSafeElementSelector(value: string | undefined): value is strin
 }
 
 /**
- * Ensures none of the path segments from `trustedBase` (exclusive) down to `target` (inclusive)
+ * Ensures neither `trustedBase` itself nor any path segment from `trustedBase` down to `target`
  * is a symlink or junction. Prevents a malicious repository from redirecting writes outside the project.
  */
 export function assertNoLinksBelow(trustedBase: string, target: string): void {
-  const rel = path.relative(trustedBase, target);
+  const resolvedBase = path.resolve(trustedBase);
+  const resolvedTarget = path.resolve(target);
+  const rel = path.relative(resolvedBase, resolvedTarget);
   if (rel.startsWith('..') || path.isAbsolute(rel)) {
     throw new Error(`Refusing to use ${target}: outside of ${trustedBase}`);
   }
-  let current = trustedBase;
-  for (const segment of rel.split(path.sep).filter(Boolean)) {
-    current = path.join(current, segment);
+
+  const checkDirSegment = (dirPath: string) => {
     let st: fs.Stats;
     try {
-      st = fs.lstatSync(current);
+      st = fs.lstatSync(dirPath);
     } catch {
-      return; // Segment does not exist yet; it will be created as a real directory.
+      return false; // Segment does not exist yet; it will be created as a real directory.
     }
     if (st.isSymbolicLink()) {
       throw new Error(
-        `Refusing to write preview files: "${current}" is a symbolic link/junction. ` +
+        `Refusing to write preview files: "${dirPath}" is a symbolic link/junction. ` +
           'Delete it and try again.'
       );
     }
     if (!st.isDirectory()) {
-      throw new Error(`Refusing to write preview files: "${current}" is not a directory.`);
+      throw new Error(`Refusing to write preview files: "${dirPath}" is not a directory.`);
+    }
+    return true;
+  };
+
+  if (!checkDirSegment(resolvedBase)) {
+    return;
+  }
+
+  let current = resolvedBase;
+  for (const segment of rel.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    if (!checkDirSegment(current)) {
+      return;
+    }
+  }
+}
+
+/**
+ * Unlinks a file path if it already exists (including broken or live symlinks) so a subsequent
+ * tool write (like esbuild's outfile) cannot follow a planted file symlink.
+ */
+export function unlinkIfExists(filePath: string): void {
+  try {
+    const st = fs.lstatSync(filePath);
+    if (st.isDirectory()) {
+      throw new Error(`Refusing to overwrite directory ${filePath}`);
+    }
+    fs.unlinkSync(filePath);
+  } catch (err: any) {
+    if (err?.code !== 'ENOENT') {
+      throw err;
     }
   }
 }
