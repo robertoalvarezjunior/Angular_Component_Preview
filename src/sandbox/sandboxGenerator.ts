@@ -213,52 +213,37 @@ import { of } from 'rxjs';
 const hasOwn = (obj: object, key: PropertyKey): boolean =>
   Object.prototype.hasOwnProperty.call(obj, key);
 
-const SAMPLE_CARD_ITEM: Record<string, any> = {
-  id: 25,
-  formattedId: '#025',
-  name: 'Pikachu',
+const SAMPLE_PLACEHOLDER_IMAGE =
+  "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><rect width='120' height='120' rx='12' fill='%2327272a'/><path d='M36 78l16-20 14 16 10-12 12 16H36z' fill='%2371717a'/><circle cx='46' cy='44' r='8' fill='%23a1a1aa'/></svg>";
+
+const SAMPLE_ITEM: Record<string, any> = {
+  id: 1,
+  name: 'Sample Item',
   title: 'Sample Title',
   label: 'Sample Label',
   description: 'Sample description text for isolated preview.',
-  imageUrl: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png',
-  image: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png',
-  sprite: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png',
-  avatar: 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/25.png',
-  types: ['electric'],
-  type: 'electric',
-  heightInMeters: 0.4,
-  weightInKg: 6.0,
-  height: 4,
-  weight: 60,
-  baseExperience: 112,
-  stats: [
-    { key: 'hp', label: 'HP (Vida)', value: 35, percentage: 25 },
-    { key: 'attack', label: 'Ataque', value: 55, percentage: 40 },
-    { key: 'speed', label: 'Velocidade', value: 90, percentage: 60 },
-  ],
-  abilities: [{ name: 'static', isHidden: false }],
+  imageUrl: SAMPLE_PLACEHOLDER_IMAGE,
+  image: SAMPLE_PLACEHOLDER_IMAGE,
+  avatar: SAMPLE_PLACEHOLDER_IMAGE,
 };
 
 export function createSampleArrayInput(inputName: string): any[] {
   const lower = inputName.toLowerCase();
-  if (lower.includes('type') || lower.includes('option')) {
+  if (lower.includes('option')) {
     return [
-      { value: 'all', label: 'Todos os tipos' },
-      { value: 'electric', label: 'Elétrico' },
-      { value: 'fire', label: 'Fogo' },
-      { value: 'water', label: 'Água' },
-      { value: 'grass', label: 'Planta' },
+      { value: 'option-1', label: 'Option 1' },
+      { value: 'option-2', label: 'Option 2' },
     ];
   }
-  return [{ ...SAMPLE_CARD_ITEM }];
+  return [{ ...SAMPLE_ITEM }];
 }
 
 export function createSampleObjectInput(_inputName: string): any {
-  return { ...SAMPLE_CARD_ITEM };
+  return { ...SAMPLE_ITEM };
 }
 
 const PRIMITIVE_HINTS: Record<string, any> = {
-  ...SAMPLE_CARD_ITEM,
+  ...SAMPLE_ITEM,
   count: 1,
   total: 12,
   page: 1,
@@ -325,8 +310,8 @@ function wrapRealServiceWithFallback(realInstance: any, serviceName: string): an
           }
           const wrappedFn = function (this: any, ...args: any[]) {
             try {
-              // If called with the synthetic ActivatedRoute id ('25') and the service has its own sample dataset with a different id, substitute it
-              if (args.length === 1 && args[0] === '25' && sampleIdFromInstance !== undefined && sampleIdFromInstance !== 25 && sampleIdFromInstance !== '25') {
+              // If called with the synthetic ActivatedRoute id ('1') and the service has its own sample dataset with a different id, substitute it
+              if (args.length === 1 && args[0] === '1' && sampleIdFromInstance !== undefined && sampleIdFromInstance !== 1 && sampleIdFromInstance !== '1') {
                 args = [sampleIdFromInstance];
               }
               return value.apply(this === receiver ? target : this, args);
@@ -374,7 +359,7 @@ export function createUniversalServiceMock(serviceName: string, depth = 0, propK
       if (prop === '__isAutoMock') return true;
       if (prop === 'then') return undefined;
 
-      // Primitive coercion when used directly in template interpolation {{ pokemon.name }}
+      // Primitive coercion when used directly in template interpolation {{ item.name }}
       if (prop === Symbol.toPrimitive) {
         return (hint: string) => {
           if (sampleValue !== undefined && typeof sampleValue !== 'object') {
@@ -390,9 +375,9 @@ export function createUniversalServiceMock(serviceName: string, depth = 0, propK
         return () => (sampleValue !== undefined ? sampleValue : 'Sample');
       }
 
-      // Direct primitive / array values for known model properties (like pokemon.types, pokemon.name, pokemon.id)
-      if (typeof prop === 'string' && hasOwn(SAMPLE_CARD_ITEM, prop)) {
-        const val = SAMPLE_CARD_ITEM[prop];
+      // Direct primitive / array values for known model properties (like item.name, item.id)
+      if (typeof prop === 'string' && hasOwn(SAMPLE_ITEM, prop)) {
+        const val = SAMPLE_ITEM[prop];
         // Only return raw primitive/array if it's NOT typically called as a Signal/method on a service
         if (!['count', 'total', 'page', 'favorites'].includes(prop)) {
           return val;
@@ -516,15 +501,15 @@ function createHybridReturnProxy(label: string, depth: number, propKey: string):
 export function createActivatedRouteMock() {
   return {
     snapshot: {
-      params: { id: '25' },
+      params: { id: '1' },
       queryParams: {},
       data: {},
       url: [],
       fragment: null,
       paramMap: {
-        get: (_key: string) => '25',
+        get: (_key: string) => '1',
         has: (_key: string) => true,
-        getAll: (_key: string) => ['25'],
+        getAll: (_key: string) => ['1'],
         keys: ['id'],
       },
       queryParamMap: {
@@ -534,15 +519,15 @@ export function createActivatedRouteMock() {
         keys: [],
       },
     },
-    params: of({ id: '25' }),
+    params: of({ id: '1' }),
     queryParams: of({}),
     data: of({}),
     url: of([]),
     fragment: of(null),
     paramMap: of({
-      get: (_key: string) => '25',
+      get: (_key: string) => '1',
       has: (_key: string) => true,
-      getAll: (_key: string) => ['25'],
+      getAll: (_key: string) => ['1'],
       keys: ['id'],
     }),
     queryParamMap: of({
@@ -664,8 +649,6 @@ export function createActivatedRouteMock() {
           defaultVal = `createSampleArrayInput('${inp.name}')`;
         } else if (inp.type === 'object') {
           defaultVal = `createSampleObjectInput('${inp.name}')`;
-        } else if (inp.rawType && inp.rawType.includes('PokemonTypeEnum')) {
-          defaultVal = `'electric'`;
         }
       }
 

@@ -644,9 +644,6 @@ export class ComponentAnalyzer {
       return [1, 2, 3];
     }
     if (elemText === 'string' || elementType.kind === ts.SyntaxKind.StringKeyword) {
-      if (lowerProp.includes('type') || lowerProp.includes('tipo')) {
-        return ['electric'];
-      }
       return ['Item 1', 'Item 2'];
     }
     if (elemText === 'boolean' || elementType.kind === ts.SyntaxKind.BooleanKeyword) {
@@ -812,49 +809,12 @@ export class ComponentAnalyzer {
     depth: number
   ): Record<string, any> {
     const obj: Record<string, any> = {};
-    const memberNames = new Set<string>();
-
-    for (const m of members) {
-      if (ts.isPropertySignature(m) && m.name) {
-        memberNames.add(m.name.getText(sourceFile).replace(/['"`]/g, ''));
-      }
-    }
-
-    const looksLikePokemon =
-      memberNames.has('formattedId') ||
-      (memberNames.has('heightInMeters') && memberNames.has('weightInKg'));
 
     for (const m of members) {
       if (!ts.isPropertySignature(m) || !m.name) {
         continue;
       }
       const key = m.name.getText(sourceFile).replace(/['"`]/g, '');
-      if (looksLikePokemon) {
-        if (key === 'id') {
-          obj[key] = 25;
-          continue;
-        }
-        if (key === 'formattedId') {
-          obj[key] = '#025';
-          continue;
-        }
-        if (key === 'name') {
-          obj[key] = 'Pikachu';
-          continue;
-        }
-        if (key === 'types') {
-          obj[key] = ['electric'];
-          continue;
-        }
-        if (key === 'heightInMeters') {
-          obj[key] = 0.4;
-          continue;
-        }
-        if (key === 'weightInKg') {
-          obj[key] = 6.0;
-          continue;
-        }
-      }
 
       if (m.type) {
         const val = this.synthesizeFromTypeNode(
@@ -896,7 +856,7 @@ export class ComponentAnalyzer {
     if (lower.includes('year') || lower.includes('ano')) {
       return 2025;
     }
-    if (lower.includes('count') || lower.includes('total') || lower.includes('region')) {
+    if (lower.includes('count') || lower.includes('total')) {
       return 12;
     }
     if (lower.includes('page')) {
@@ -904,12 +864,6 @@ export class ComponentAnalyzer {
     }
     if (lower === 'id') {
       return 1;
-    }
-    if (lower.includes('height')) {
-      return 0.4;
-    }
-    if (lower.includes('weight')) {
-      return 6.0;
     }
     if (lower.includes('percent')) {
       return 50;
@@ -930,31 +884,16 @@ export class ComponentAnalyzer {
       lower.includes('thumb') ||
       lower.includes('logo')
     ) {
-      return 'https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/25.png';
-    }
-    if (lower.includes('acronym') || lower.includes('sigla') || lower === 'code') {
-      return 'PDAD';
-    }
-    if (lower.includes('statuslabel')) {
-      return 'Publicada';
-    }
-    if (lower.includes('categorylabel')) {
-      return 'Socioeconômico';
-    }
-    if (lower.includes('department') || lower.includes('sector') || lower.includes('diretoria')) {
-      return 'DIEPS / IPEDF';
-    }
-    if (lower === 'formattedid') {
-      return '#025';
+      return "data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='120' height='120' viewBox='0 0 120 120'><rect width='120' height='120' rx='12' fill='%2327272a'/><path d='M36 78l16-20 14 16 10-12 12 16H36z' fill='%2371717a'/><circle cx='46' cy='44' r='8' fill='%23a1a1aa'/></svg>";
     }
     if (lower === 'id' || lower.endsWith('id')) {
       return 'item-1';
     }
     if (lower.includes('subtitle') || lower.includes('subtitulo')) {
-      return 'Subtítulo complementar';
+      return 'Sample subtitle';
     }
     if (lower.includes('title') || lower.includes('titulo')) {
-      return 'Título de Exemplo';
+      return 'Sample Title';
     }
     if (
       lower.includes('summary') ||
@@ -963,13 +902,13 @@ export class ComponentAnalyzer {
       lower.includes('resumo') ||
       lower.includes('descricao')
     ) {
-      return 'Descrição de exemplo gerada automaticamente para visualização isolada do componente.';
+      return 'Sample description text for isolated component preview.';
     }
     if (lower.includes('name') || lower.includes('nome')) {
-      return 'Exemplo';
+      return 'Sample Name';
     }
     if (lower.includes('label') || lower.includes('rotulo')) {
-      return 'Opção de Exemplo';
+      return 'Sample Label';
     }
     if (lower.includes('url') || lower.includes('link') || lower.includes('href')) {
       return 'https://example.com';
