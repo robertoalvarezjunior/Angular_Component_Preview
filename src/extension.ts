@@ -135,7 +135,14 @@ export function activate(context: vscode.ExtensionContext) {
         currentMetadata = updatedMeta;
         const config = vscode.workspace.getConfiguration('angularComponentPreview');
         const autoMock = config.get<boolean>('autoMockServices', true);
-        sandboxGenerator.generateSandbox(updatedMeta, autoMock, previewServer.getSessionToken());
+        const workspaceRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(savedPath))?.uri.fsPath;
+        const updatedSandbox = sandboxGenerator.generateSandbox(
+          updatedMeta,
+          autoMock,
+          previewServer.getSessionToken(),
+          workspaceRoot
+        );
+        previewServer.updateSandbox(updatedSandbox);
         if (ioChanged) {
           PreviewPanel.currentPanel.updateMetadata(updatedMeta);
         }
@@ -184,7 +191,12 @@ async function launchIsolatedPreview(
         currentMetadata = meta;
         const config = vscode.workspace.getConfiguration('angularComponentPreview');
         const autoMock = config.get<boolean>('autoMockServices', true);
-        const preferredPort = config.get<number>('port', 0);
+        const rawPort = config.get<number>('port', 0);
+        const preferredPort =
+          typeof rawPort === 'number' && Number.isInteger(rawPort) && (rawPort === 0 || (rawPort >= 1024 && rawPort <= 65535))
+            ? rawPort
+            : 0;
+        const workspaceRoot = vscode.workspace.getWorkspaceFolder(vscode.Uri.file(componentFilePath))?.uri.fsPath;
 
         if (!previewServer) {
           previewServer = new PreviewServer();
@@ -193,7 +205,8 @@ async function launchIsolatedPreview(
         const sandbox = sandboxGenerator.generateSandbox(
           meta,
           autoMock,
-          previewServer.getSessionToken()
+          previewServer.getSessionToken(),
+          workspaceRoot
         );
 
         await previewServer.startOrUpdate(
@@ -216,11 +229,13 @@ async function launchIsolatedPreview(
           async () => {
             if (currentMetadata && previewServer) {
               const refreshedMeta = analyzer.analyzeFile(currentMetadata.filePath) || currentMetadata;
-              sandboxGenerator.generateSandbox(
+              const refreshedSandbox = sandboxGenerator.generateSandbox(
                 refreshedMeta,
                 autoMock,
-                previewServer.getSessionToken()
+                previewServer.getSessionToken(),
+                workspaceRoot
               );
+              previewServer.updateSandbox(refreshedSandbox);
               await previewServer.triggerRebuild();
             }
           }

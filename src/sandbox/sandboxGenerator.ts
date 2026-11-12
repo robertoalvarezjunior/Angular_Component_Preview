@@ -1,5 +1,7 @@
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { ComponentMetadata } from '../analyzer/componentAnalyzer';
 import {
   assertNoLinksBelow,
@@ -8,6 +10,7 @@ import {
   isSafeElementSelector,
   isSafeIdentifier,
   safeWriteFile,
+  unlinkIfExists,
 } from '../security/guards';
 
 export interface SandboxGenerationResult {
@@ -15,6 +18,8 @@ export interface SandboxGenerationResult {
   projectRoot: string;
   entryFilePath: string;
   indexHtmlPath: string;
+  /** In-memory HTML served by PreviewServer so sessionToken is never written to disk. */
+  indexHtml: string;
   globalStyles: string[];
   sessionToken: string;
 }
@@ -27,7 +32,8 @@ export class SandboxGenerator {
   public generateSandbox(
     meta: ComponentMetadata,
     autoMockServices: boolean,
-    sessionToken: string
+    sessionToken = '',
+    workspaceRoot?: string
   ): SandboxGenerationResult {
     if (!isSafeElementSelector(meta.selector)) {
       throw new Error(
@@ -38,7 +44,7 @@ export class SandboxGenerator {
       throw new Error(`Unsupported component class name "${meta.className}".`);
     }
 
-    const projectRoot = this.findAngularProjectRoot(meta.filePath);
+    const projectRoot = this.findAngularProjectRoot(meta.filePath, workspaceRoot);
     const sandboxDir = path.join(
       projectRoot,
       'node_modules',
@@ -46,8 +52,8 @@ export class SandboxGenerator {
       'angular-component-preview'
     );
 
-    // Refuse to follow symlinks/junctions planted by the repository (would redirect writes outside the project)
-    assertNoLinksBelow(path.join(projectRoot, 'node_modules'), sandboxDir);
+    // Refuse to follow symlinks/junctions anywhere from projectRoot down to sandboxDir (including node_modules itself)
+    assertNoLinksBelow(projectRoot, sandboxDir);
     if (!fs.existsSync(sandboxDir)) {
       fs.mkdirSync(sandboxDir, { recursive: true });
     }
@@ -69,34 +75,71 @@ export class SandboxGenerator {
     );
     safeWriteFile(entryFilePath, mainSource);
 
-    // 3. Write index.html
+    // 3. Keep index.html (which embeds sessionToken) strictly in memory and remove any stale file on disk
     const indexHtmlPath = path.join(sandboxDir, 'index.html');
-    safeWriteFile(indexHtmlPath, this.buildIndexHtml(meta, sessionToken));
+    unlinkIfExists(indexHtmlPath);
+    const indexHtml = this.buildIndexHtml(meta, sessionToken);
 
     return {
       sandboxDir,
       projectRoot,
       entryFilePath,
       indexHtmlPath,
+      indexHtml,
       globalStyles,
       sessionToken,
     };
   }
 
-  private findAngularProjectRoot(componentFilePath: string): string {
-    let dir = path.dirname(componentFilePath);
+  private findAngularProjectRoot(componentFilePath: string, workspaceRoot?: string): string {
+    const startDir = path.dirname(componentFilePath);
+    const homeDir = os.homedir();
+    let dir = startDir;
+
     while (true) {
-      if (
-        fs.existsSync(path.join(dir, 'angular.json')) ||
-        fs.existsSync(path.join(dir, 'package.json'))
-      ) {
+      // Never treat the user's home directory or filesystem root as an Angular project root
+      if (path.resolve(dir).toLowerCase() === path.resolve(homeDir).toLowerCase()) {
+        return startDir;
+      }
+      if (workspaceRoot && !isPathInside(workspaceRoot, dir)) {
+        return isPathInside(workspaceRoot, startDir) ? workspaceRoot : startDir;
+      }
+
+      if (fs.existsSync(path.join(dir, 'angular.json'))) {
         return dir;
       }
+
+      const pkgPath = path.join(dir, 'package.json');
+      if (fs.existsSync(pkgPath)) {
+        if (this.isAngularOrValidProjectPackage(pkgPath, dir === startDir)) {
+          return dir;
+        }
+      }
+
       const parent = path.dirname(dir);
       if (parent === dir) {
-        return path.dirname(componentFilePath);
+        return workspaceRoot && isPathInside(workspaceRoot, startDir) ? workspaceRoot : startDir;
       }
       dir = parent;
+    }
+  }
+
+  private isAngularOrValidProjectPackage(pkgPath: string, isImmediateDir: boolean): boolean {
+    try {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      const deps = {
+        ...(pkg.dependencies || {}),
+        ...(pkg.devDependencies || {}),
+        ...(pkg.peerDependencies || {}),
+      };
+      if ('@angular/core' in deps) {
+        return true;
+      }
+      // Accept a package.json without @angular/core only if it is in the component's own tree with a src/ folder
+      const pkgDir = path.dirname(pkgPath);
+      return isImmediateDir || fs.existsSync(path.join(pkgDir, 'src'));
+    } catch {
+      return false;
     }
   }
 
@@ -167,6 +210,9 @@ export class SandboxGenerator {
 import { Injector, runInInjectionContext } from '@angular/core';
 import { of } from 'rxjs';
 
+const hasOwn = (obj: object, key: PropertyKey): boolean =>
+  Object.prototype.hasOwnProperty.call(obj, key);
+
 const SAMPLE_CARD_ITEM: Record<string, any> = {
   id: 25,
   formattedId: '#025',
@@ -229,7 +275,12 @@ const PRIMITIVE_HINTS: Record<string, any> = {
  */
 export function createSmartServiceInstance(Token: any, tokenName: string, injector: Injector): any {
   try {
-    const realInstance = runInInjectionContext(injector, () => new Token());
+    const realInstance = runInInjectionContext(injector, () => {
+      if (typeof (Token as any).ɵfac === 'function') {
+        return (Token as any).ɵfac();
+      }
+      return new Token();
+    });
     return wrapRealServiceWithFallback(realInstance, tokenName);
   } catch (err) {
     console.warn(\`[Angular Component Preview] Could not instantiate real \${tokenName}, using universal auto-mock:\`, err);
@@ -237,8 +288,32 @@ export function createSmartServiceInstance(Token: any, tokenName: string, inject
   }
 }
 
+function discoverFirstSampleId(instance: any): string | number | undefined {
+  try {
+    if (!instance || typeof instance !== 'object') return undefined;
+    for (const key of Object.keys(instance)) {
+      const val = (instance as any)[key];
+      if (Array.isArray(val) && val.length > 0 && val[0] && typeof val[0] === 'object') {
+        const first = val[0];
+        for (const field of Object.keys(first)) {
+          if (/^(id|id_.*|.*Id|codigo|slug|uuid)$/i.test(field)) {
+            const candidate = first[field];
+            if (typeof candidate === 'string' || typeof candidate === 'number') {
+              return candidate;
+            }
+          }
+        }
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return undefined;
+}
+
 function wrapRealServiceWithFallback(realInstance: any, serviceName: string): any {
   const fallbackMock = createUniversalServiceMock(serviceName);
+  const sampleIdFromInstance = discoverFirstSampleId(realInstance);
   return new Proxy(realInstance, {
     get(target, prop, receiver) {
       if (prop in target) {
@@ -250,10 +325,15 @@ function wrapRealServiceWithFallback(realInstance: any, serviceName: string): an
           }
           const wrappedFn = function (this: any, ...args: any[]) {
             try {
+              // If called with the synthetic ActivatedRoute id ('25') and the service has its own sample dataset with a different id, substitute it
+              if (args.length === 1 && args[0] === '25' && sampleIdFromInstance !== undefined && sampleIdFromInstance !== 25 && sampleIdFromInstance !== '25') {
+                args = [sampleIdFromInstance];
+              }
               return value.apply(this === receiver ? target : this, args);
             } catch (err) {
               console.warn(\`[Angular Component Preview] Fallback on \${serviceName}.\${String(prop)}():\`, err);
-              return fallbackMock[prop](...args);
+              const fb = fallbackMock[prop];
+              return typeof fb === 'function' ? fb(...args) : fb;
             }
           };
           Object.assign(wrappedFn, value);
@@ -279,7 +359,7 @@ export function createUniversalServiceMock(serviceName: string, depth = 0, propK
   }
 
   const cache = new Map<string | symbol, any>();
-  const sampleValue = propKey in PRIMITIVE_HINTS ? PRIMITIVE_HINTS[propKey] : undefined;
+  const sampleValue = hasOwn(PRIMITIVE_HINTS, propKey) ? PRIMITIVE_HINTS[propKey] : undefined;
 
   const callableTarget = function (..._args: any[]) {
     // If called as a Signal or getter (e.g. favoritesService.count() or favoritesService.favorites())
@@ -311,7 +391,7 @@ export function createUniversalServiceMock(serviceName: string, depth = 0, propK
       }
 
       // Direct primitive / array values for known model properties (like pokemon.types, pokemon.name, pokemon.id)
-      if (typeof prop === 'string' && prop in SAMPLE_CARD_ITEM) {
+      if (typeof prop === 'string' && hasOwn(SAMPLE_CARD_ITEM, prop)) {
         const val = SAMPLE_CARD_ITEM[prop];
         // Only return raw primitive/array if it's NOT typically called as a Signal/method on a service
         if (!['count', 'total', 'page', 'favorites'].includes(prop)) {
@@ -574,10 +654,15 @@ export function createActivatedRouteMock() {
       }
 
       if (defaultVal === `'Sample ${inp.name}'`) {
-        if (inp.type === 'number') defaultVal = '1';
-        else if (inp.type === 'boolean') defaultVal = 'false';
-        else if (inp.type === 'array') defaultVal = `createSampleArrayInput('${inp.name}')`;
-        else if (inp.type === 'object') {
+        if (inp.sampleValue !== undefined) {
+          defaultVal = JSON.stringify(inp.sampleValue);
+        } else if (inp.type === 'number') {
+          defaultVal = '1';
+        } else if (inp.type === 'boolean') {
+          defaultVal = 'false';
+        } else if (inp.type === 'array') {
+          defaultVal = `createSampleArrayInput('${inp.name}')`;
+        } else if (inp.type === 'object') {
           defaultVal = `createSampleObjectInput('${inp.name}')`;
         } else if (inp.rawType && inp.rawType.includes('PokemonTypeEnum')) {
           defaultVal = `'electric'`;
@@ -739,11 +824,15 @@ ${depProviders.join('\n')}
 
   private buildIndexHtml(meta: ComponentMetadata, sessionToken: string): string {
     const cacheBust = Date.now();
-    const safePrefix = `/${encodeURIComponent(sessionToken)}/`;
+    const nonce = crypto.randomBytes(16).toString('base64');
+    const safePrefix = sessionToken ? `/${encodeURIComponent(sessionToken)}/` : '/';
+    // Note: '@angular/compiler' JIT requires 'unsafe-eval' (new Function) to compile component templates at runtime
+    const csp = `default-src 'self'; script-src 'self' 'unsafe-eval' 'nonce-${nonce}'; style-src 'self' 'unsafe-inline' https:; img-src 'self' data: blob: https: http:; font-src 'self' data: https:; connect-src 'self' https: http: ws: wss:; object-src 'none'; base-uri 'self';`;
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Live Preview: ${escapeHtml(meta.className)}</title>
   <style>
@@ -775,13 +864,26 @@ ${depProviders.join('\n')}
     }
   </style>
   <!-- Root-anchored session paths so Angular Router URL normalization never breaks asset loading -->
-  <link rel="stylesheet" href="${safePrefix}bundle.css?v=${cacheBust}" onerror="this.remove()" />
+  <link rel="stylesheet" href="${safePrefix}bundle.css?v=${cacheBust}" />
 </head>
 <body>
   <ng-live-preview-host></ng-live-preview-host>
   <div id="ng-live-error-banner"></div>
-  <script type="module" src="${safePrefix}main.preview.js?v=${cacheBust}"></script>
-  <script>
+  <script nonce="${nonce}">
+    window.addEventListener('error', (event) => {
+      const banner = document.getElementById('ng-live-error-banner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.textContent = 'Runtime Error: ' + (event.error?.message || event.message || String(event));
+      }
+    });
+    window.addEventListener('unhandledrejection', (event) => {
+      const banner = document.getElementById('ng-live-error-banner');
+      if (banner) {
+        banner.style.display = 'block';
+        banner.textContent = 'Unhandled Error: ' + (event.reason?.message || String(event.reason));
+      }
+    });
     // Live Reload via Server-Sent Events (SSE)
     const evtSource = new EventSource('${safePrefix}__ng_live_sse');
     evtSource.onmessage = (event) => {
@@ -796,6 +898,7 @@ ${depProviders.join('\n')}
       }
     };
   </script>
+  <script nonce="${nonce}" type="module" src="${safePrefix}main.preview.js?v=${cacheBust}"></script>
 </body>
 </html>
 `;

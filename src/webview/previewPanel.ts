@@ -449,7 +449,7 @@ export class PreviewPanel {
   </div>
   <div id="compile-error"></div>
   <div id="canvas-container" class="viewport-wrapper bg-light">
-    <iframe id="preview-frame" src="${previewUrl}"></iframe>
+    <iframe id="preview-frame" sandbox="allow-scripts allow-same-origin allow-forms" src="${previewUrl}"></iframe>
   </div>
 
   <!-- Interactive @Input() / @Output() Panel -->
@@ -523,7 +523,10 @@ export class PreviewPanel {
         const displayName = inp.alias && inp.alias !== inp.name ? inp.name + ' (' + inp.alias + ')' : inp.name;
         const reqBadge = inp.required ? '<span class="prop-req">*required</span>' : '';
         const typeLabel = inp.rawType || inp.type || 'any';
-        const currentVal = inp.name in initialValues ? initialValues[inp.name] : undefined;
+        const currentVal =
+          initialValues && Object.prototype.hasOwnProperty.call(initialValues, inp.name)
+            ? initialValues[inp.name]
+            : undefined;
 
         html += '<tr>';
         html += '<td><span class="prop-name">@Input() ' + escapeHtml(displayName) + '</span>' + reqBadge + '</td>';
@@ -570,20 +573,21 @@ export class PreviewPanel {
     }
 
     function renderControlWidget(inp, currentVal) {
+      const effectiveVal = currentVal !== undefined ? currentVal : inp.sampleValue;
       const nameAttr = 'data-input-name="' + escapeHtml(inp.name) + '" data-input-type="' + escapeHtml(inp.type) + '"';
       if (inp.type === 'boolean') {
-        const isChecked = currentVal === true || (currentVal === undefined && inp.defaultValueExpr === 'true');
+        const isChecked = effectiveVal === true || (effectiveVal === undefined && inp.defaultValueExpr === 'true');
         return '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;"><input type="checkbox" ' + nameAttr + (isChecked ? ' checked' : '') + ' /> <span>boolean</span></label>';
       }
       if (inp.type === 'number') {
-        const val = currentVal !== undefined ? currentVal : 1;
+        const val = effectiveVal !== undefined ? effectiveVal : 1;
         return '<input type="number" class="control-input" ' + nameAttr + ' value="' + escapeHtml(String(val)) + '" />';
       }
       if (inp.type === 'object' || inp.type === 'array') {
-        const jsonStr = currentVal !== undefined ? JSON.stringify(currentVal, null, 2) : (inp.type === 'array' ? '[]' : '{}');
+        const jsonStr = effectiveVal !== undefined ? JSON.stringify(effectiveVal, null, 2) : (inp.type === 'array' ? '[]' : '{}');
         return '<textarea class="control-input" ' + nameAttr + '>' + escapeHtml(jsonStr) + '</textarea>';
       }
-      const strVal = currentVal !== undefined ? String(currentVal) : ('Sample ' + inp.name);
+      const strVal = effectiveVal !== undefined ? String(effectiveVal) : ('Sample ' + inp.name);
       return '<input type="text" class="control-input" ' + nameAttr + ' value="' + escapeHtml(strVal) + '" />';
     }
 
@@ -690,12 +694,16 @@ export class PreviewPanel {
 
         const row = document.createElement('div');
         row.className = 'event-row';
-        const payloadStr = typeof msg.payload === 'object' ? JSON.stringify(msg.payload) : String(msg.payload);
+        const rawPayload = typeof msg.payload === 'object' ? JSON.stringify(msg.payload) : String(msg.payload);
+        const payloadStr = rawPayload.length > 2000 ? rawPayload.slice(0, 2000) + '…' : rawPayload;
         row.innerHTML =
           '<span class="event-time">[' + escapeHtml(msg.timestamp || '') + ']</span>' +
           '<span class="event-name">(' + escapeHtml(msg.alias || msg.name) + ')</span>' +
           '<span class="event-payload">→ ' + escapeHtml(payloadStr) + '</span>';
         eventsLog.prepend(row);
+        while (eventsLog.children.length > 100) {
+          eventsLog.lastElementChild?.remove();
+        }
       }
     });
   </script>
